@@ -45,6 +45,7 @@ extern "C" {
 #include <ws2tcpip.h>
 #else
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <netinet/in.h>
 #endif
 
@@ -242,6 +243,18 @@ struct sctp_assoc_change {
 	sctp_assoc_t sac_assoc_id;
 	uint8_t sac_info[]; /* not available yet */
 };
+
+#ifdef _WIN32
+
+struct iovec {
+	unsigned long len;
+	char *buf;
+};
+
+#define iov_base buf
+#define iov_len len
+
+#endif
 
 /* sac_state values */
 #define SCTP_COMM_UP        0x0001
@@ -898,6 +911,17 @@ ssize_t
 usrsctp_sendv(struct socket *so,
               const void *data,
               size_t len,
+              struct sockaddr *to,
+              int addrcnt,
+              void *info,
+              socklen_t infolen,
+              unsigned int infotype,
+              int flags);
+
+ssize_t
+usrsctp_sendvec(struct socket *so,
+              const struct iovec *iov,
+              int iovcnt,
               struct sockaddr *to,
               int addrcnt,
               void *info,

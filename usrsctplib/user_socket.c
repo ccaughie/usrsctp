@@ -794,27 +794,40 @@ userspace_sctp_sendmsg(struct socket *so,
 }
 
 
+size_t
+iovec_len(const struct iovec* iov, int iovcnt)
+{
+	size_t size = 0;
+	int i;
+
+	for (i = 0; i < iovcnt; ++i) {
+		size += iov[i].iov_len;
+	}
+
+	return size;
+}
+
 ssize_t
-usrsctp_sendv(struct socket *so,
-              const void *data,
-              size_t len,
-              struct sockaddr *to,
-              int addrcnt,
-              void *info,
-              socklen_t infolen,
-              unsigned int infotype,
-              int flags)
+usrsctp_sendvec(struct socket *so,
+		const struct iovec *iov,
+		int iovcnt,
+		struct sockaddr *to,
+		int addrcnt,
+		void *info,
+		socklen_t infolen,
+		unsigned int infotype,
+		int flags)
 {
 	struct sctp_sndrcvinfo sinfo;
 	struct uio auio;
-	struct iovec iov[1];
 	int use_sinfo;
+	int len;
 
 	if (so == NULL) {
 		errno = EBADF;
 		return (-1);
 	}
-	if (data == NULL) {
+	if (iov == NULL) {
 		errno = EFAULT;
 		return (-1);
 	}
@@ -888,11 +901,10 @@ usrsctp_sendv(struct socket *so,
 		return (-1);
 	}
 
-	iov[0].iov_base = (caddr_t)data;
-	iov[0].iov_len = len;
+	len = iovec_len(iov, iovcnt);
 
 	auio.uio_iov =  iov;
-	auio.uio_iovcnt = 1;
+	auio.uio_iovcnt = iovcnt;
 	auio.uio_segflg = UIO_USERSPACE;
 	auio.uio_rw = UIO_WRITE;
 	auio.uio_offset = 0;			/* XXX */
@@ -905,6 +917,29 @@ usrsctp_sendv(struct socket *so,
 	}
 }
 
+ssize_t
+usrsctp_sendv(struct socket *so,
+	      const void *data,
+	      size_t len,
+	      struct sockaddr *to,
+	      int addrcnt,
+	      void *info,
+	      socklen_t infolen,
+	      unsigned int infotype,
+	      int flags)
+{
+	struct iovec iov;
+
+	if (data == NULL) {
+		errno = EFAULT;
+		return (-1);
+	}
+
+	iov.iov_base = (char*)data;
+	iov.iov_len = len;
+
+	return usrsctp_sendvec(so, &iov, 1, to, addrcnt, info, infolen, infotype, flags);
+}
 
 ssize_t
 userspace_sctp_sendmbuf(struct socket *so,
