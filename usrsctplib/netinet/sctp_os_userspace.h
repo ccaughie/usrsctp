@@ -105,6 +105,45 @@ typedef HANDLE userland_thread_t;
 #define ssize_t    __int64
 #define __func__	__FUNCTION__
 
+#ifdef SCTP_USE_WINSOCK_CODES
+#undef EWOULDBLOCK
+#undef EINPROGRESS
+#undef EALREADY
+#undef ENOTSOCK
+#undef EDESTADDRREQ
+#undef EMSGSIZE
+#undef EPROTOTYPE
+#undef ENOPROTOOPT
+#undef EPROTONOSUPPORT
+#undef ESOCKTNOSUPPORT
+#undef EOPNOTSUPP
+#undef ENOTSUP
+#undef EPFNOSUPPORT
+#undef EAFNOSUPPORT
+#undef EADDRINUSE
+#undef EADDRNOTAVAIL
+#undef ENETDOWN
+#undef ENETUNREACH
+#undef ENETRESET
+#undef ECONNABORTED
+#undef ECONNRESET
+#undef ENOBUFS
+#undef EISCONN
+#undef ENOTCONN
+#undef ESHUTDOWN
+#undef ETOOMANYREFS
+#undef ETIMEDOUT
+#undef ECONNREFUSED
+#undef ELOOP
+#undef EHOSTDOWN
+#undef EHOSTUNREACH
+#undef EPROCLIM
+#undef EUSERS
+#undef EDQUOT
+#undef ESTALE
+#undef EREMOTE
+#endif
+
 #ifndef EWOULDBLOCK
 #define EWOULDBLOCK             WSAEWOULDBLOCK
 #endif

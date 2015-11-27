@@ -74,6 +74,12 @@ extern "C" {
 
 #define ssize_t   __int64
 #define MSG_EOR   0x8
+
+#ifdef SCTP_USE_WINSOCK_CODES
+#undef EWOULDBLOCK
+#undef EINPROGRESS
+#endif
+
 #ifndef EWOULDBLOCK
 #define EWOULDBLOCK  WSAEWOULDBLOCK
 #endif
