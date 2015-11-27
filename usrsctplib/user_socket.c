@@ -3390,7 +3390,7 @@ usrsctp_conninput(void *addr, const void *buffer, size_t length, uint8_t ecn_bit
 
 void usrsctp_fire_timer(int delta)
 {
-	sctp_handle_tick(delta);
+	sctp_handle_tick(MSEC_TO_TICKS(delta));
 }
 
 #define USRSCTP_SYSCTL_SET_DEF(__field) \
