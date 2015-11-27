@@ -39,6 +39,7 @@
 #include <netinet/sctp_sysctl.h>
 #include <netinet/sctp_input.h>
 #include <netinet/sctp_peeloff.h>
+#include <netinet/sctp_callout.h>
 #ifdef INET6
 #include <netinet6/sctp6_var.h>
 #endif
@@ -76,11 +77,7 @@ extern int sctp_sosend(struct socket *so, struct sockaddr *addr, struct uio *uio
 extern int sctp_attach(struct socket *so, int proto, uint32_t vrf_id);
 extern int sctpconn_attach(struct socket *so, int proto, uint32_t vrf_id);
 
-void
-usrsctp_init(uint16_t port,
-             int (*conn_output)(void *addr, void *buffer, size_t length, uint8_t tos, uint8_t set_df),
-             void (*debug_printf)(const char *format, ...))
-{
+static void init_sync() {
 #if defined(__Userspace_os_Windows)
 #if defined(INET) || defined(INET6)
 	WSADATA wsaData;
@@ -103,7 +100,25 @@ usrsctp_init(uint16_t port,
 	pthread_mutexattr_destroy(&mutex_attr);
 	pthread_cond_init(&accept_cond, NULL);
 #endif
-	sctp_init(port, conn_output, debug_printf);
+}
+
+void
+usrsctp_init(uint16_t port,
+             int (*conn_output)(void *addr, void *buffer, size_t length, uint8_t tos, uint8_t set_df),
+             void (*debug_printf)(const char *format, ...))
+{
+	init_sync();
+	sctp_init(port, conn_output, debug_printf, 1);
+}
+
+
+void
+usrsctp_init_nothreads(uint16_t port,
+		       int (*conn_output)(void *addr, void *buffer, size_t length, uint8_t tos, uint8_t set_df),
+		       void (*debug_printf)(const char *format, ...))
+{
+	init_sync();
+	sctp_init(port, conn_output, debug_printf, 0);
 }
 
 
@@ -1508,8 +1523,9 @@ sowakeup(struct socket *so, struct sockbuf *sb)
 #endif
 	}
 	SOCKBUF_UNLOCK(sb);
-	/*__Userspace__ what todo about so_upcall?*/
 
+	if ((sb->sb_flags & SB_UPCALL) && so->so_upcall != NULL)
+		(*so->so_upcall)(so, so->so_upcallarg, M_NOWAIT);
 }
 #else /* kernel version for reference */
 /*
@@ -1972,6 +1988,46 @@ usrsctp_get_non_blocking(struct socket *so)
 }
 
 int
+usrsctp_get_events(struct socket *so)
+{
+	int events = 0;
+
+	if (so == NULL) {
+		errno = EBADF;
+		return -1;
+	}
+
+	if (soreadable(so)) {
+		events |= SCTP_EVENT_READ;
+	}
+	if (sowriteable(so)) {
+		events |= SCTP_EVENT_WRITE;
+	}
+	if (so->so_error) {
+		events |= SCTP_EVENT_ERROR;
+	}
+	return events;
+}
+
+int
+usrsctp_set_upcall(struct socket *so, void (*upcall)(struct socket *, void *, int), void *arg)
+{
+	if (so == NULL) {
+		errno = EBADF;
+		return (-1);
+	}
+
+	SOCK_LOCK(so);
+	so->so_upcall = upcall;
+	so->so_upcallarg = arg;
+	so->so_snd.sb_flags |= SB_UPCALL;
+	so->so_rcv.sb_flags |= SB_UPCALL;
+	SOCK_UNLOCK(so);
+
+	return (0);
+}
+
+int
 soconnect(struct socket *so, struct sockaddr *nam)
 {
 	int error;
@@ -2348,6 +2404,16 @@ usrsctp_getsockopt(struct socket *so, int level, int option_name,
 					l->l_onoff = 0;
 				}
 				*option_len = (socklen_t)sizeof(struct linger);
+				return (0);
+			}
+		case SO_ERROR:
+			if (*option_len < sizeof(int)) {
+				errno = EINVAL;
+				return (-1);
+			} else {
+				int *intval = (int *)option_value;
+				*intval = so->so_error;
+				*option_len = (socklen_t)sizeof(int);
 				return (0);
 			}
 		default:
@@ -3285,6 +3351,10 @@ usrsctp_conninput(void *addr, const void *buffer, size_t length, uint8_t ecn_bit
 	return;
 }
 
+void usrsctp_fire_timer(int delta)
+{
+	sctp_handle_tick(delta);
+}
 
 #define USRSCTP_SYSCTL_SET_DEF(__field) \
 void usrsctp_sysctl_set_ ## __field(uint32_t value) { \

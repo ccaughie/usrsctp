@@ -47,7 +47,8 @@ all: \
 	ekr_client \
 	ekr_server \
 	ekr_peer \
-	ekr_loop
+	ekr_loop \
+	st_client
 
 client:
 	$(CC) $(CFLAGS) $(CVARSDLL) -c client.c
@@ -88,6 +89,10 @@ ekr_peer:
 ekr_loop:
 	$(CC) $(CFLAGS) $(CVARSDLL) -c ekr_loop.c
 	link -out:ekr_loop.exe ekr_loop.obj $(LINKFLAGS)
+
+st_client:
+    $(CC) $(CFLAGS) $(CVARSDLL) -c st_client.c
+    link -out:st_client.exe st_client.obj $(LINKFLAGS)
 
 clean:
 	del /F client.exe
