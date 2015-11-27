@@ -78,7 +78,7 @@ typedef HANDLE userland_thread_t;
 #define IPVERSION  4
 #define MAXTTL     255
 /* VS2010 comes with stdint.h */
-#if _MSC_VER >= 1600
+#if !defined(_MSC_VER) || _MSC_VER >= 1600
 #include <stdint.h>
 #else
 #define uint64_t   unsigned __int64
@@ -218,11 +218,13 @@ typedef char* caddr_t;
 
 #define bzero(buf, len) memset(buf, 0, len)
 #define bcopy(srcKey, dstKey, len) memcpy(dstKey, srcKey, len)
+#ifdef _MSC_VER
 #if _MSC_VER < 1900
 #define snprintf(data, size, format, ...) _snprintf_s(data, size, _TRUNCATE, format, __VA_ARGS__)
 #endif
 #define inline __inline
 #define __inline__ __inline
+#endif
 #define	MSG_EOR		0x8		/* data completes record */
 #define	MSG_DONTWAIT	0x80		/* this message should be nonblocking */
 
@@ -417,6 +419,11 @@ int Win_getifaddrs(struct ifaddrs**);
 #define getifaddrs(interfaces)  (int)Win_getifaddrs(interfaces)
 int win_if_nametoindex(const char *);
 #define if_nametoindex(x) win_if_nametoindex(x)
+
+#else /* !defined(Userspace_os_Windows) */
+#if defined(__ANDROID__)
+#define in_addr_t uint32_t
+#endif
 #endif
 
 #define mtx_lock(arg1)
@@ -1034,8 +1041,10 @@ int sctp_userspace_get_mtu_from_ifn(uint32_t if_index, int af);
 struct sockaddr_conn {
 #ifdef HAVE_SCONN_LEN
 	uint8_t sconn_len;
-#endif
 	uint8_t sconn_family;
+#else
+	uint16_t sconn_family;
+#endif
 	uint16_t sconn_port;
 	void *sconn_addr;
 };

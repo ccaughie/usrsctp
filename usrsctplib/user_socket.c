@@ -59,9 +59,11 @@
 #endif
 userland_mutex_t accept_mtx;
 userland_cond_t accept_cond;
-#ifdef _WIN32
+#ifdef _MSC_VER
 #include <time.h>
 #include <sys/timeb.h>
+#else
+#include <sys/time.h>
 #endif
 
 MALLOC_DEFINE(M_PCB, "sctp_pcb", "sctp pcb");
@@ -3236,7 +3238,7 @@ usrsctp_dumppacket(const void *buf, size_t len, int outbound)
 {
 	size_t i, pos;
 	char *dump_buf, *packet;
-#ifdef _WIN32
+#ifdef _MSC_VER
 	struct timeb tb;
 	struct tm t;
 #else
@@ -3252,7 +3254,7 @@ usrsctp_dumppacket(const void *buf, size_t len, int outbound)
 		return (NULL);
 	}
 	pos = 0;
-#ifdef _WIN32
+#ifdef _MSC_VER
 	ftime(&tb);
 	localtime_s(&t, &tb.time);
 	_snprintf_s(dump_buf, PREAMBLE_LENGTH + 1, PREAMBLE_LENGTH, PREAMBLE_FORMAT,
@@ -3267,7 +3269,7 @@ usrsctp_dumppacket(const void *buf, size_t len, int outbound)
 	         t->tm_hour, t->tm_min, t->tm_sec, (long)tv.tv_usec);
 #endif
 	pos += PREAMBLE_LENGTH;
-#ifdef _WIN32
+#ifdef _MSC_VER
 	strncpy_s(dump_buf + pos, strlen(HEADER) + 1, HEADER, strlen(HEADER));
 #else
 	strcpy(dump_buf + pos, HEADER);
@@ -3284,7 +3286,7 @@ usrsctp_dumppacket(const void *buf, size_t len, int outbound)
 		dump_buf[pos++] = low < 10 ? '0' + low : 'a' + (low - 10);
 		dump_buf[pos++] = ' ';
 	}
-#ifdef _WIN32
+#ifdef _MSC_VER
 	strncpy_s(dump_buf + pos, strlen(TRAILER) + 1, TRAILER, strlen(TRAILER));
 #else
 	strcpy(dump_buf + pos, TRAILER);

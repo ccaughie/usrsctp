@@ -102,13 +102,17 @@ struct uio {
  */
 #if defined (__Userspace_os_Windows)
 #define AF_ROUTE  17
+#ifdef _MSC_VER
 typedef __int32 pid_t;
+#endif
 typedef unsigned __int32 uid_t;
 enum sigType {
 	SIGNAL = 0,
 	BROADCAST = 1,
 	MAX_EVENTS = 2
 };
+#elif defined (__ANDROID__)
+typedef int32_t u_quad_t;
 #endif
 
 /*-

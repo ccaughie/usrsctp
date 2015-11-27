@@ -77,7 +77,7 @@
 	} \
 }
 #endif
-#if defined(__Userspace_os_Windows)
+#if defined(__Userspace_os_Windows) && defined(_MSC_VER)
 static void atomic_init() {} /* empty when we are not using atomic_mtx */
 #else
 static inline void atomic_init() {} /* empty when we are not using atomic_mtx */

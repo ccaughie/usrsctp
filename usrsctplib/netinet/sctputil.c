@@ -77,6 +77,10 @@ __FBSDID("$FreeBSD: head/sys/netinet/sctputil.c 291364 2015-11-26 09:25:20Z tuex
 #endif
 #endif
 
+#if defined(__Userspace_os_Windows) && !defined(_MSC_VER)
+#include <mswsock.h>
+#endif
+
 extern struct sctp_cc_functions sctp_cc_functions[];
 extern struct sctp_ss_functions sctp_ss_functions[];
 

@@ -31,7 +31,9 @@
 #include <netinet/sctp_pcb.h>
 #include <sys/timeb.h>
 #include <iphlpapi.h>
+#ifdef _MSC_VER
 #pragma comment(lib, "IPHLPAPI.lib")
+#endif
 #endif
 #include <netinet/sctp_os_userspace.h>
 #if defined(__Userspace_os_FreeBSD)

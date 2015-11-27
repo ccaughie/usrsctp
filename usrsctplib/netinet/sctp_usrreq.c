@@ -64,6 +64,10 @@ __FBSDID("$FreeBSD: head/sys/netinet/sctp_usrreq.c 291376 2015-11-26 23:12:41Z t
 #include <netinet/sctp_peeloff.h>
 #endif				/* HAVE_SCTP_PEELOFF_SOCKOPT */
 
+#ifndef _MSC_VER
+#include <sys/time.h>
+#endif
+
 #if defined(__APPLE__)
 #define APPLE_FILE_NO 7
 #endif
