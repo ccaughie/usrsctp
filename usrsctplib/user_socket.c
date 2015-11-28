@@ -903,7 +903,7 @@ usrsctp_sendvec(struct socket *so,
 
 	len = iovec_len(iov, iovcnt);
 
-	auio.uio_iov =  iov;
+	auio.uio_iov =  (struct iovec*)iov;
 	auio.uio_iovcnt = iovcnt;
 	auio.uio_segflg = UIO_USERSPACE;
 	auio.uio_rw = UIO_WRITE;

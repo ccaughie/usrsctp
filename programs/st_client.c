@@ -78,7 +78,6 @@ handle_packets(int sock, struct socket* s, void* sconn_addr)
 
 	fd_set rfds;
 	struct timeval tv;
-	int retval;
 
 	unsigned next_fire_time = get_tick_count();
 	unsigned last_fire_time = next_fire_time;
@@ -98,7 +97,7 @@ handle_packets(int sock, struct socket* s, void* sconn_addr)
 		tv.tv_sec = wait_time / 1000;
 		tv.tv_usec = (wait_time % 1000) * 1000;
 
-		retval = select(1, &rfds, NULL, NULL, &tv);
+		select(1, &rfds, NULL, NULL, &tv);
 
 		length = recv(sock, buf, MAX_PACKET_SIZE, 0);
 		if (length > 0) {
@@ -173,7 +172,7 @@ static void on_socket_readable(struct socket* s) {
 
 static void handle_upcall(struct socket *s, void *arg, int flags)
 {
-    int events = usrsctp_get_events(s);
+	int events = usrsctp_get_events(s);
 
 	if (connecting) {
 		if (events & SCTP_EVENT_ERROR) {
@@ -266,12 +265,12 @@ main(int argc, char *argv[])
 #ifdef _WIN32
 	if ((fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == INVALID_SOCKET) {
 		printf("socket() failed with error: %ld\n", WSAGetLastError());
-        exit(1);
+		exit(1);
 	}
 #else
 	if ((fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 		perror("socket");
-        exit(1);
+		exit(1);
 	}
 #endif
 	memset(&sin, 0, sizeof(struct sockaddr_in));
@@ -287,12 +286,12 @@ main(int argc, char *argv[])
 #ifdef _WIN32
 	if (bind(fd, (struct sockaddr *)&sin, sizeof(struct sockaddr_in)) == SOCKET_ERROR) {
 		printf("bind() failed with error: %ld\n", WSAGetLastError());
-        exit(1);
+		exit(1);
 	}
 #else
 	if (bind(fd, (struct sockaddr *)&sin, sizeof(struct sockaddr_in)) < 0) {
 		perror("bind");
-        exit(1);
+		exit(1);
 	}
 #endif
 	memset(&sin, 0, sizeof(struct sockaddr_in));
@@ -308,12 +307,12 @@ main(int argc, char *argv[])
 #ifdef _WIN32
 	if (connect(fd, (struct sockaddr *)&sin, sizeof(struct sockaddr_in)) == SOCKET_ERROR) {
 		printf("connect() failed with error: %ld\n", WSAGetLastError());
-        exit(1);
+		exit(1);
 	}
 #else
 	if (connect(fd, (struct sockaddr *)&sin, sizeof(struct sockaddr_in)) < 0) {
 		perror("connect");
-        exit(1);
+		exit(1);
 	}
 #endif
 #ifdef SCTP_DEBUG
@@ -324,11 +323,11 @@ main(int argc, char *argv[])
 
 	if ((s = usrsctp_socket(AF_CONN, SOCK_STREAM, IPPROTO_SCTP, NULL, NULL, 0, NULL)) == NULL) {
 		perror("usrsctp_socket");
-        exit(1);
+		exit(1);
 	}
 
 	usrsctp_set_non_blocking(s, 1);
-    usrsctp_set_upcall(s, handle_upcall, NULL);
+	usrsctp_set_upcall(s, handle_upcall, NULL);
 
 	memset(&sconn, 0, sizeof(struct sockaddr_conn));
 	sconn.sconn_family = AF_CONN;
@@ -356,7 +355,9 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-    connecting = 1;
+	connecting = 1;
 
-	return handle_packets(fd, s, sconn.sconn_addr);
+	handle_packets(fd, s, sconn.sconn_addr);
+
+	return 0;
 }
