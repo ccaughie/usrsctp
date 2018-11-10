@@ -862,7 +862,7 @@ usrsctp_sendvec(struct socket *so,
 	struct sctp_sndrcvinfo sinfo;
 	struct uio auio;
 	int use_sinfo;
-	int len;
+	size_t len;
 	sctp_assoc_t *assoc_id;
 
 	if (so == NULL) {
