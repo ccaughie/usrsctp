@@ -29,11 +29,7 @@
  */
 
 /*
- * Usage: daytime_server [local_encaps_port] [remote_encaps_port]
- * 
- * Example
- * Server: $ ./daytime_server 11111 22222
- * Client: $ ./client 127.0.0.1 13 0 22222 11111
+ * Usage: daytime_server_upcall [local_encaps_port] [remote_encaps_port]
  */
 
 #ifdef _WIN32
@@ -53,9 +49,38 @@
 #endif
 #include <usrsctp.h>
 
-#define PORT 13
 #define DAYTIME_PPID 40
-#define SLEEP 1
+#define PORT 13
+
+static void
+handle_accept(struct socket *sock, void *data, int flags)
+{
+	struct socket *conn_sock;
+	char buffer[80];
+	time_t now;
+	socklen_t addr_len = 0;
+	struct sctp_sndinfo sndinfo;
+
+	if (((conn_sock = usrsctp_accept(sock, NULL, &addr_len)) == NULL)
+	    && (errno != EINPROGRESS)) {
+		perror("usrsctp_accept");
+		return;
+	}
+	time(&now);
+#ifdef _WIN32
+		_snprintf(buffer, sizeof(buffer), "%s", ctime(&now));
+#else
+		snprintf(buffer, sizeof(buffer), "%s", ctime(&now));
+#endif
+		sndinfo.snd_sid = 0;
+		sndinfo.snd_flags = 0;
+		sndinfo.snd_ppid = htonl(DAYTIME_PPID);
+		sndinfo.snd_context = 0;
+		sndinfo.snd_assoc_id = 0;
+		usrsctp_sendv(conn_sock, buffer, strlen(buffer), NULL, 0, (void *)&sndinfo,
+		              (socklen_t)sizeof(struct sctp_sndinfo), SCTP_SENDV_SNDINFO, 0);
+		usrsctp_close(conn_sock);
+}
 
 void
 debug_printf(const char *format, ...)
@@ -70,13 +95,9 @@ debug_printf(const char *format, ...)
 int
 main(int argc, char *argv[])
 {
-	struct socket *sock, *conn_sock;
+	struct socket *sock;
 	struct sockaddr_in addr;
 	struct sctp_udpencaps encaps;
-	socklen_t addr_len;
-	char buffer[80];
-	time_t now;
-	struct sctp_sndinfo sndinfo;
 
 	if (argc > 1) {
 		usrsctp_init(atoi(argv[1]), NULL, debug_printf);
@@ -91,6 +112,7 @@ main(int argc, char *argv[])
 	if ((sock = usrsctp_socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP, NULL, NULL, 0, NULL)) == NULL) {
 		perror("usrsctp_socket");
 	}
+	usrsctp_set_non_blocking(sock, 1);
 	if (argc > 2) {
 		memset(&encaps, 0, sizeof(struct sctp_udpencaps));
 		encaps.sue_address.ss_family = AF_INET;
@@ -112,34 +134,22 @@ main(int argc, char *argv[])
 	if (usrsctp_listen(sock, 1) < 0) {
 		perror("usrsctp_listen");
 	}
+
+	usrsctp_set_upcall(sock, handle_accept, NULL);
+
 	while (1) {
-		addr_len = 0;
-		if ((conn_sock = usrsctp_accept(sock, NULL, &addr_len)) == NULL) {
-			continue;
-		}
-		time(&now);
 #ifdef _WIN32
-		_snprintf(buffer, sizeof(buffer), "%s", ctime(&now));
+		Sleep(1*1000);
 #else
-		snprintf(buffer, sizeof(buffer), "%s", ctime(&now));
+		sleep(1);
 #endif
-		sndinfo.snd_sid = 0;
-		sndinfo.snd_flags = 0;
-		sndinfo.snd_ppid = htonl(DAYTIME_PPID);
-		sndinfo.snd_context = 0;
-		sndinfo.snd_assoc_id = 0;
-		if (usrsctp_sendv(conn_sock, buffer, strlen(buffer), NULL, 0, (void *)&sndinfo,
-		                  (socklen_t)sizeof(struct sctp_sndinfo), SCTP_SENDV_SNDINFO, 0) < 0) {
-			perror("usrsctp_sendv");
-		}
-		usrsctp_close(conn_sock);
 	}
 	usrsctp_close(sock);
 	while (usrsctp_finish() != 0) {
 #ifdef _WIN32
-		Sleep(SLEEP * 1000);
+		Sleep(1000);
 #else
-		sleep(SLEEP);
+		sleep(1);
 #endif
 	}
 	return (0);

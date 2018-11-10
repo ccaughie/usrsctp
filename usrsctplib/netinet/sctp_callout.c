@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  * Copyright (c) 2001-2007, by Cisco Systems, Inc. All rights reserved.
  * Copyright (c) 2008-2012, by Randall Stewart. All rights reserved.
  * Copyright (c) 2008-2012, by Michael Tuexen. All rights reserved.
@@ -44,6 +46,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
+#include <user_atomic.h>
 #include <netinet/sctp_sysctl.h>
 #include <netinet/sctp_pcb.h>
 #else
@@ -80,7 +83,7 @@ static sctp_os_timer_t *sctp_os_timer_next = NULL;
 void
 sctp_os_timer_init(sctp_os_timer_t *c)
 {
-	bzero(c, sizeof(*c));
+	memset(c, 0, sizeof(*c));
 }
 
 void
@@ -198,7 +201,7 @@ user_sctp_timer_iterate(void *arg)
 		timeout.tv_usec = 1000 * TIMEOUT_INTERVAL;
 		select(0, NULL, NULL, NULL, &timeout);
 #endif
-		if (SCTP_BASE_VAR(timer_thread_should_exit)) {
+		if (atomic_cmpset_int(&SCTP_BASE_VAR(timer_thread_should_exit), 1, 1)) {
 			break;
 		}
 		sctp_handle_tick(MSEC_TO_TICKS(TIMEOUT_INTERVAL));
@@ -213,18 +216,12 @@ sctp_start_timer(void)
 	 * No need to do SCTP_TIMERQ_LOCK_INIT();
 	 * here, it is being done in sctp_pcb_init()
 	 */
-#if defined (__Userspace_os_Windows)
-	if ((SCTP_BASE_VAR(timer_thread) = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)user_sctp_timer_iterate, NULL, 0, NULL)) == NULL) {
-		SCTP_PRINTF("ERROR; Creating ithread failed\n");
-	}
-#else
 	int rc;
 
-	rc = pthread_create(&SCTP_BASE_VAR(timer_thread), NULL, user_sctp_timer_iterate, NULL);
+	rc = sctp_userspace_thread_create(&SCTP_BASE_VAR(timer_thread), user_sctp_timer_iterate);
 	if (rc) {
-		SCTP_PRINTF("ERROR; return code from pthread_create() is %d\n", rc);
+		SCTP_PRINTF("ERROR; return code from sctp_thread_create() is %d\n", rc);
 	}
-#endif
 }
 
 #endif

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011-2013 Michael Tuexen
+ * Copyright (C) 2018-2018 Felix Weinrank
  *
  * All rights reserved.
  *
@@ -52,6 +53,7 @@
 #define MAX_PACKET_SIZE (1<<16)
 #define LINE_LENGTH (1<<20)
 #define DISCARD_PPID 39
+#define DUMP_PKTS_TO_FILE 1
 
 #ifdef _WIN32
 static DWORD WINAPI
@@ -113,6 +115,17 @@ conn_output(void *addr, void *buf, size_t length, uint8_t tos, uint8_t set_df)
 		//fprintf(stderr, "%s", dump_buf);
 		usrsctp_freedumpbuffer(dump_buf);
 	}
+
+#ifdef	DUMP_PKTS_TO_FILE
+	FILE *fp;
+	char fname[128];
+	static int pktnum = 0;
+	snprintf(fname, sizeof(fname), "pkt-%d", pktnum++);
+	fp = fopen(fname, "wb");
+	fwrite((char *)buf + 12, 1, length - 12, fp);
+	fclose(fp);
+#endif
+
 #ifdef _WIN32
 	if (send(*fdp, buf, (int)length, 0) == SOCKET_ERROR) {
 		return (WSAGetLastError());
@@ -125,30 +138,52 @@ conn_output(void *addr, void *buf, size_t length, uint8_t tos, uint8_t set_df)
 	}
 }
 
-static int
-receive_cb(struct socket *sock, union sctp_sockstore addr, void *data,
-           size_t datalen, struct sctp_rcvinfo rcv, int flags, void *ulp_info)
+static void
+handle_upcall(struct socket *sock, void *data, int flgs)
 {
-	printf("Message %p received on sock = %p.\n", data, (void *)sock);
-	if (data) {
-		if ((flags & MSG_NOTIFICATION) == 0) {
-			printf("Messsage of length %d received via %p:%u on stream %u with SSN %u and TSN %u, PPID %u, context %u, flags %x.\n",
-			       (int)datalen,
-			       addr.sconn.sconn_addr,
-			       ntohs(addr.sconn.sconn_port),
-			       rcv.rcv_sid,
-			       rcv.rcv_ssn,
-			       rcv.rcv_tsn,
-			       ntohl(rcv.rcv_ppid),
-			       rcv.rcv_context,
-			       flags);
+	char *buf;
+	int events;
+
+	buf = malloc(MAX_PACKET_SIZE);
+
+	while ((events = usrsctp_get_events(sock)) && (events & SCTP_EVENT_READ)) {
+		struct sctp_recvv_rn rn;
+		ssize_t n;
+		//struct sockaddr_storage addr;
+		union sctp_sockstore addr;
+		int flags = 0;
+		socklen_t len = (socklen_t)sizeof(addr);
+		unsigned int infotype = 0;
+		socklen_t infolen = sizeof(struct sctp_recvv_rn);
+		memset(&rn, 0, sizeof(struct sctp_recvv_rn));
+		n = usrsctp_recvv(sock, buf, MAX_PACKET_SIZE, (struct sockaddr *) &addr, &len, (void *)&rn, &infolen, &infotype, &flags);
+		if (n < 0) {
+			perror("usrsctp_recvv");
+			break;
+		} else if (n > 0) {
+			if (flags & MSG_NOTIFICATION) {
+				printf("Notification of length %d received.\n", (int)n);
+			} else {
+				printf("Messsage of length %d received via %p:%u on stream %u with SSN %u and TSN %u, PPID %u, context %u, flags %x.\n",
+				       (int)n,
+				       addr.sconn.sconn_addr,
+				       ntohs(addr.sconn.sconn_port),
+				       rn.recvv_rcvinfo.rcv_sid,
+				       rn.recvv_rcvinfo.rcv_ssn,
+				       rn.recvv_rcvinfo.rcv_tsn,
+				       ntohl(rn.recvv_rcvinfo.rcv_ppid),
+				       rn.recvv_rcvinfo.rcv_context,
+				       flags);
+			}
+		} else {
+			usrsctp_deregister_address(data);
+			usrsctp_close(sock);
+			break;
 		}
-		free(data);
-	} else {
-		usrsctp_deregister_address(ulp_info);
-		usrsctp_close(sock);
 	}
-	return (1);
+	free(buf);
+
+	return;
 }
 
 #if 0
@@ -281,7 +316,7 @@ main(void)
 #else
 	pthread_t tid_c, tid_s;
 #endif
-	int cur_buf_size, snd_buf_size, rcv_buf_size;
+	int cur_buf_size, snd_buf_size, rcv_buf_size, on;
 	socklen_t opt_len;
 	struct sctp_sndinfo sndinfo;
 	char *line;
@@ -388,10 +423,13 @@ main(void)
 	usrsctp_sysctl_set_sctp_ecn_enable(0);
 	usrsctp_register_address((void *)&fd_c);
 	usrsctp_register_address((void *)&fd_s);
-	if ((s_c = usrsctp_socket(AF_CONN, SOCK_STREAM, IPPROTO_SCTP, receive_cb, NULL, 0, &fd_c)) == NULL) {
+
+	if ((s_c = usrsctp_socket(AF_CONN, SOCK_STREAM, IPPROTO_SCTP, NULL, NULL, 0, NULL)) == NULL) {
 		perror("usrsctp_socket");
 		exit(EXIT_FAILURE);
 	}
+	usrsctp_set_upcall(s_c, handle_upcall, &fd_c);
+
 	opt_len = (socklen_t)sizeof(int);
 	cur_buf_size = 0;
 	if (usrsctp_getsockopt(s_c, SOL_SOCKET, SO_SNDBUF, &cur_buf_size, &opt_len) < 0) {
@@ -411,10 +449,11 @@ main(void)
 		exit(EXIT_FAILURE);
 	}
 	printf("to %d.\n", cur_buf_size);
-	if ((s_l = usrsctp_socket(AF_CONN, SOCK_STREAM, IPPROTO_SCTP, receive_cb, NULL, 0, &fd_s)) == NULL) {
+	if ((s_l = usrsctp_socket(AF_CONN, SOCK_STREAM, IPPROTO_SCTP, NULL, NULL, 0, NULL)) == NULL) {
 		perror("usrsctp_socket");
 		exit(EXIT_FAILURE);
 	}
+
 	opt_len = (socklen_t)sizeof(int);
 	cur_buf_size = 0;
 	if (usrsctp_getsockopt(s_l, SOL_SOCKET, SO_RCVBUF, &cur_buf_size, &opt_len) < 0) {
@@ -434,6 +473,12 @@ main(void)
 		exit(EXIT_FAILURE);
 	}
 	printf("to %d.\n", cur_buf_size);
+
+	on = 1;
+	if (usrsctp_setsockopt(s_l, IPPROTO_SCTP, SCTP_RECVRCVINFO, &on, sizeof(int)) < 0) {
+		perror("usrsctp_setsockopt");
+		exit(EXIT_FAILURE);
+	}
 	/* Bind the client side. */
 	memset(&sconn, 0, sizeof(struct sockaddr_conn));
 	sconn.sconn_family = AF_CONN;
@@ -475,17 +520,21 @@ main(void)
 		perror("usrsctp_connect");
 		exit(EXIT_FAILURE);
 	}
+
 	if ((s_s = usrsctp_accept(s_l, NULL, NULL)) == NULL) {
 		perror("usrsctp_accept");
 		exit(EXIT_FAILURE);
 	}
+	
+	usrsctp_set_upcall(s_s, handle_upcall, &fd_s);
+
 	usrsctp_close(s_l);
 	if ((line = malloc(LINE_LENGTH)) == NULL) {
 		exit(EXIT_FAILURE);
 	}
 	memset(line, 'A', LINE_LENGTH);
 	sndinfo.snd_sid = 1;
-	sndinfo.snd_flags = 0;
+	sndinfo.snd_flags = SCTP_UNORDERED;
 	sndinfo.snd_ppid = htonl(DISCARD_PPID);
 	sndinfo.snd_context = 0;
 	sndinfo.snd_assoc_id = 0;

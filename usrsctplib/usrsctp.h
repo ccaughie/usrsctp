@@ -68,6 +68,7 @@ extern "C" {
 #define uint8_t   unsigned __int8
 #define uint16_t  unsigned __int16
 #define uint32_t  unsigned __int32
+#define uint64_t  unsigned __int64
 #define int16_t   __int16
 #define int32_t   __int32
 #endif
@@ -93,11 +94,31 @@ extern "C" {
 
 typedef uint32_t sctp_assoc_t;
 
+#if defined(_WIN32) && defined(_MSC_VER)
+#pragma pack (push, 1)
+#define SCTP_PACKED
+#else
+#define SCTP_PACKED __attribute__((packed))
+#endif
+
+struct sctp_common_header {
+	uint16_t source_port;
+	uint16_t destination_port;
+	uint32_t verification_tag;
+	uint32_t crc32c;
+} SCTP_PACKED;
+
+#if defined(_WIN32) && defined(_MSC_VER)
+#pragma pack(pop)
+#endif
+#undef SCTP_PACKED
+
 #define AF_CONN 123
 /* The definition of struct sockaddr_conn MUST be in
  * tune with other sockaddr_* structures.
  */
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(HAVE_SCONN_LEN)
+#if defined(__APPLE__) || defined(__Bitrig__) || defined(__DragonFly__) || \
+    defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(HAVE_SCONN_LEN)
 struct sockaddr_conn {
 	uint8_t sconn_len;
 	uint8_t sconn_family;
@@ -126,6 +147,10 @@ union sctp_sockstore {
 #define SCTP_FUTURE_ASSOC  0
 #define SCTP_CURRENT_ASSOC 1
 #define SCTP_ALL_ASSOC     2
+
+#define SCTP_EVENT_READ    0x0001
+#define SCTP_EVENT_WRITE   0x0002
+#define SCTP_EVENT_ERROR   0x0004
 
 /***  Structures and definitions to use the socket API  ***/
 
@@ -541,6 +566,10 @@ struct sctp_event_subscribe {
 
 #define SCTP_ENABLE_STREAM_RESET        0x00000900 /* struct sctp_assoc_value */
 
+/* Pluggable Stream Scheduling Socket option */
+#define SCTP_PLUGGABLE_SS               0x00001203
+#define SCTP_SS_VALUE                   0x00001204
+
 /*
  * read-only options
  */
@@ -799,6 +828,12 @@ struct sctp_cc_option {
 	struct sctp_assoc_value aid_value;
 };
 
+struct sctp_stream_value {
+	sctp_assoc_t assoc_id;
+	uint16_t stream_id;
+	uint16_t stream_value;
+};
+
 struct sctp_timeouts {
 	sctp_assoc_t stimo_assoc_id;
 	uint32_t stimo_init;
@@ -854,13 +889,6 @@ struct sctp_prstatus {
 /* First-come, first-serve */
 #define SCTP_SS_FIRST_COME          0x00000005
 
-/*
- * Socket event flags
- */
-#define SCTP_EVENT_READ		0x00000001
-#define SCTP_EVENT_WRITE	0x00000002
-#define SCTP_EVENT_ERROR	0x00000004
-
 /******************** System calls *************/
 
 struct socket;
@@ -896,6 +924,13 @@ usrsctp_getsockopt(struct socket *so,
                    int option_name,
                    void *option_value,
                    socklen_t *option_len);
+
+int
+usrsctp_opt_info(struct socket *so,
+                 sctp_assoc_t id,
+                 int opt,
+                 void *arg,
+                 socklen_t *size);
 
 int
 usrsctp_getpaddrs(struct socket *so,
@@ -985,6 +1020,9 @@ usrsctp_connectx(struct socket *so,
 void
 usrsctp_close(struct socket *so);
 
+sctp_assoc_t
+usrsctp_getassocid(struct socket *, struct sockaddr *);
+
 int
 usrsctp_finish(void);
 
@@ -1000,13 +1038,6 @@ usrsctp_set_non_blocking(struct socket *, int);
 int
 usrsctp_get_non_blocking(struct socket *);
 
-int
-usrsctp_get_events(struct socket *so);
-
-int
-usrsctp_set_upcall(struct socket *so,
-		   void (*upcall)(struct socket *, void *, int), void *arg);
-
 void
 usrsctp_register_address(void *);
 
@@ -1019,6 +1050,15 @@ usrsctp_set_ulpinfo(struct socket *, void *);
 void
 usrsctp_fire_timer(int delta);
 
+int
+usrsctp_set_upcall(struct socket *so,
+                   void (*upcall)(struct socket *, void *, int),
+                   void *arg);
+
+int
+usrsctp_get_events(struct socket *so);
+
+
 #define SCTP_DUMP_OUTBOUND 1
 #define SCTP_DUMP_INBOUND  0
 
@@ -1028,8 +1068,25 @@ usrsctp_dumppacket(const void *, size_t, int);
 void
 usrsctp_freedumpbuffer(char *);
 
-#define USRSCTP_SYSCTL_DECL(__field)                \
-void usrsctp_sysctl_set_ ## __field(uint32_t value);\
+void
+usrsctp_enable_crc32c_offload(void);
+
+void
+usrsctp_disable_crc32c_offload(void);
+
+uint32_t
+usrsctp_crc32c(void *, size_t);
+
+#define USRSCTP_TUNABLE_DECL(__field)               \
+int usrsctp_tunable_set_ ## __field(uint32_t value);\
+uint32_t usrsctp_sysctl_get_ ## __field(void);
+
+USRSCTP_TUNABLE_DECL(sctp_hashtblsize)
+USRSCTP_TUNABLE_DECL(sctp_pcbtblsize)
+USRSCTP_TUNABLE_DECL(sctp_chunkscale)
+
+#define USRSCTP_SYSCTL_DECL(__field)               \
+int usrsctp_sysctl_set_ ## __field(uint32_t value);\
 uint32_t usrsctp_sysctl_get_ ## __field(void);
 
 USRSCTP_SYSCTL_DECL(sctp_sendspace)
@@ -1043,17 +1100,11 @@ USRSCTP_SYSCTL_DECL(sctp_asconf_enable)
 USRSCTP_SYSCTL_DECL(sctp_reconfig_enable)
 USRSCTP_SYSCTL_DECL(sctp_nrsack_enable)
 USRSCTP_SYSCTL_DECL(sctp_pktdrop_enable)
-USRSCTP_SYSCTL_DECL(sctp_strict_sacks)
-#if !defined(SCTP_WITH_NO_CSUM)
 USRSCTP_SYSCTL_DECL(sctp_no_csum_on_loopback)
-#endif
 USRSCTP_SYSCTL_DECL(sctp_peer_chunk_oh)
 USRSCTP_SYSCTL_DECL(sctp_max_burst_default)
 USRSCTP_SYSCTL_DECL(sctp_max_chunks_on_queue)
-USRSCTP_SYSCTL_DECL(sctp_hashtblsize)
-USRSCTP_SYSCTL_DECL(sctp_pcbtblsize)
 USRSCTP_SYSCTL_DECL(sctp_min_split_point)
-USRSCTP_SYSCTL_DECL(sctp_chunkscale)
 USRSCTP_SYSCTL_DECL(sctp_delayed_sack_time_default)
 USRSCTP_SYSCTL_DECL(sctp_sack_freq_default)
 USRSCTP_SYSCTL_DECL(sctp_system_free_resc_limit)
@@ -1082,7 +1133,6 @@ USRSCTP_SYSCTL_DECL(sctp_mbuf_threshold_count)
 USRSCTP_SYSCTL_DECL(sctp_do_drain)
 USRSCTP_SYSCTL_DECL(sctp_hb_maxburst)
 USRSCTP_SYSCTL_DECL(sctp_abort_if_one_2_one_hits_limit)
-USRSCTP_SYSCTL_DECL(sctp_strict_data_order)
 USRSCTP_SYSCTL_DECL(sctp_min_residual)
 USRSCTP_SYSCTL_DECL(sctp_max_retran_chunk)
 USRSCTP_SYSCTL_DECL(sctp_logging_level)
@@ -1160,7 +1210,7 @@ struct sctpstat {
 	uint32_t  sctps_recvauthfailed;      /* total number of auth failed */
 	uint32_t  sctps_recvexpress;         /* total fast path receives all one chunk */
 	uint32_t  sctps_recvexpressm;        /* total fast path multi-part data */
-	uint32_t  sctps_recvnocrc;
+	uint32_t  sctps_recv_spare;          /* formerly sctps_recvnocrc */
 	uint32_t  sctps_recvswcrc;
 	uint32_t  sctps_recvhwcrc;
 
@@ -1177,7 +1227,7 @@ struct sctpstat {
 	uint32_t  sctps_sendecne;            /* total output ECNE chunks    */
 	uint32_t  sctps_sendauth;            /* total output AUTH chunks FIXME   */
 	uint32_t  sctps_senderrors;          /* ip_output error counter */
-	uint32_t  sctps_sendnocrc;
+	uint32_t  sctps_send_spare;          /* formerly sctps_sendnocrc */
 	uint32_t  sctps_sendswcrc;
 	uint32_t  sctps_sendhwcrc;
 	/* PCKDROPREP statistics: */

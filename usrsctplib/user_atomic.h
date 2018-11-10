@@ -78,9 +78,9 @@
 }
 #endif
 #if defined(__Userspace_os_Windows) && defined(_MSC_VER)
-static void atomic_init() {} /* empty when we are not using atomic_mtx */
+static void atomic_init(void) {} /* empty when we are not using atomic_mtx */
 #else
-static inline void atomic_init() {} /* empty when we are not using atomic_mtx */
+static inline void atomic_init(void) {} /* empty when we are not using atomic_mtx */
 #endif
 
 #else
@@ -169,7 +169,7 @@ static inline u_int dummy_atomic_cmpset(u_int* p, u_int cmpval, u_int newval)
 	} \
 }
 #endif
-static inline void atomic_init() {} /* empty when we are not using atomic_mtx */
+static inline void atomic_init(void) {} /* empty when we are not using atomic_mtx */
 #endif
 
 #if 0 /* using libatomic_ops */

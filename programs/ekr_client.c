@@ -53,7 +53,11 @@
 #define BUFFER_SIZE 80
 #define DISCARD_PPID 39
 
+#ifdef _WIN32
+static DWORD WINAPI
+#else
 static void *
+#endif
 handle_packets(void *arg)
 {
 #ifdef _WIN32
@@ -71,6 +75,9 @@ handle_packets(void *arg)
 	fdp = (int *)arg;
 #endif
 	for (;;) {
+#if defined(__NetBSD__)
+		pthread_testcancel();
+#endif
 		length = recv(*fdp, buf, MAX_PACKET_SIZE, 0);
 		if (length > 0) {
 			if ((dump_buf = usrsctp_dumppacket(buf, (size_t)length, SCTP_DUMP_INBOUND)) != NULL) {
@@ -80,7 +87,11 @@ handle_packets(void *arg)
 			usrsctp_conninput(fdp, buf, (size_t)length, 0);
 		}
 	}
+#ifdef _WIN32
+	return 0;
+#else
 	return (NULL);
+#endif
 }
 
 static int
@@ -103,7 +114,7 @@ conn_output(void *addr, void *buf, size_t length, uint8_t tos, uint8_t set_df)
 		usrsctp_freedumpbuffer(dump_buf);
 	}
 #ifdef _WIN32
-	if (send(*fdp, buf, length, 0) == SOCKET_ERROR) {
+	if (send(*fdp, buf, (int)length, 0) == SOCKET_ERROR) {
 		return (WSAGetLastError());
 #else
 	if (send(*fdp, buf, length, 0) < 0) {
@@ -123,7 +134,7 @@ receive_cb(struct socket *sock, union sctp_sockstore addr, void *data,
 		if (flags & MSG_NOTIFICATION) {
 			printf("Notification of length %d received.\n", (int)datalen);
 		} else {
-			printf("Msg of length %d received via %p:%u on stream %d with SSN %u and TSN %u, PPID %d, context %u.\n",
+			printf("Msg of length %d received via %p:%u on stream %u with SSN %u and TSN %u, PPID %u, context %u.\n",
 			       (int)datalen,
 			       addr.sconn.sconn_addr,
 			       ntohs(addr.sconn.sconn_port),
@@ -188,11 +199,13 @@ main(int argc, char *argv[])
 	/* set up a connected UDP socket */
 #ifdef _WIN32
 	if ((fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == INVALID_SOCKET) {
-		printf("socket() failed with error: %ld\n", WSAGetLastError());
+		printf("socket() failed with error: %d\n", WSAGetLastError());
+		exit(EXIT_FAILURE);
 	}
 #else
 	if ((fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 		perror("socket");
+		exit(EXIT_FAILURE);
 	}
 #endif
 	memset(&sin, 0, sizeof(struct sockaddr_in));
@@ -203,15 +216,17 @@ main(int argc, char *argv[])
 	sin.sin_port = htons(atoi(argv[2]));
 	if (!inet_pton(AF_INET, argv[1], &sin.sin_addr.s_addr)){
 		printf("error: invalid address\n");
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 #ifdef _WIN32
 	if (bind(fd, (struct sockaddr *)&sin, sizeof(struct sockaddr_in)) == SOCKET_ERROR) {
-		printf("bind() failed with error: %ld\n", WSAGetLastError());
+		printf("bind() failed with error: %d\n", WSAGetLastError());
+		exit(EXIT_FAILURE);
 	}
 #else
 	if (bind(fd, (struct sockaddr *)&sin, sizeof(struct sockaddr_in)) < 0) {
 		perror("bind");
+		exit(EXIT_FAILURE);
 	}
 #endif
 	memset(&sin, 0, sizeof(struct sockaddr_in));
@@ -222,15 +237,17 @@ main(int argc, char *argv[])
 	sin.sin_port = htons(atoi(argv[4]));
 	if (!inet_pton(AF_INET, argv[3], &sin.sin_addr.s_addr)){
 		printf("error: invalid address\n");
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 #ifdef _WIN32
 	if (connect(fd, (struct sockaddr *)&sin, sizeof(struct sockaddr_in)) == SOCKET_ERROR) {
-		printf("connect() failed with error: %ld\n", WSAGetLastError());
+		printf("connect() failed with error: %d\n", WSAGetLastError());
+		exit(EXIT_FAILURE);
 	}
 #else
 	if (connect(fd, (struct sockaddr *)&sin, sizeof(struct sockaddr_in)) < 0) {
 		perror("connect");
+		exit(EXIT_FAILURE);
 	}
 #endif
 #ifdef SCTP_DEBUG
@@ -239,7 +256,7 @@ main(int argc, char *argv[])
 	usrsctp_sysctl_set_sctp_ecn_enable(0);
 	usrsctp_register_address((void *)&fd);
 #ifdef _WIN32
-	tid = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)&handle_packets, (void *)&fd, 0, NULL);
+	tid = CreateThread(NULL, 0, &handle_packets, (void *)&fd, 0, NULL);
 #else
 	pthread_create(&tid, NULL, &handle_packets, (void *)&fd);
 #endif
@@ -291,7 +308,7 @@ main(int argc, char *argv[])
 	TerminateThread(tid, 0);
 	WaitForSingleObject(tid, INFINITE);
 	if (closesocket(fd) == SOCKET_ERROR) {
-		printf("closesocket() failed with error: %ld\n", WSAGetLastError());
+		printf("closesocket() failed with error: %d\n", WSAGetLastError());
 	}
 	WSACleanup();
 #else

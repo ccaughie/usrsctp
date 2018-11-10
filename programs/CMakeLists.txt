@@ -1,6 +1,6 @@
 #
 # Copyright (C) 2015-2015 Oleg Alexeenkov
-# Copyright (C) 2015-2015 Felix Weinrank
+# Copyright (C) 2015-2017 Felix Weinrank
 #
 # All rights reserved.
 #
@@ -28,178 +28,80 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-message(">> WARNINING: CMAKE SUPPORT IS EXPERIMENTAL <<")
-
-cmake_minimum_required(VERSION 2.6)
-include_directories(../usrsctplib)
 
 
 #################################################
 # INCLUDE MODULES
 #################################################
 
-include(CheckFunctionExists)
-include(CheckStructHasMember)
 include(CheckIncludeFile)
-include(CMakePushCheckState)
-include(CheckTypeSize)
-
-
-#################################################
-# CHECK FOR TYPES AND FUNCTIONS
-#################################################
-
-# xxx warum machen wir die checks?
-check_type_size("size_t" HAVE_SIZE_T)
-check_type_size("ssize_t" HAVE_SSIZE_T)
-
-check_function_exists("socket" HAVE_SOCKET)
-check_function_exists("inet_addr" HAVE_INET_ADDR)
 
 
 #################################################
 # CHECK INCLUDES
 #################################################
 
-check_include_file(sys/socket.h HAVE_SYS_SOCKET_H)
-check_include_file(sys/types.h HAVE_SYS_TYPES_H)
-check_include_file(sys/queue.h HAVE_SYS_QUEUE_H)
-check_include_file(linux/if_addr.h HAVE_LINUX_IF_ADDR_H)
-check_include_file(linux/rtnetlink.h HAVE_LINUX_RTNETLINK_H)
-check_include_file(netinet/ip_icmp.h HAVE_NETINET_IP_ICMP_H)
-check_include_file(usrsctp.h HAVE_USRSCTP_H)
+include_directories(${CMAKE_SOURCE_DIR}/usrsctplib)
 
-
-#################################################
-# CHECK STRUCT MEMBERS
-#################################################
-
-check_struct_has_member("struct sockaddr" "sa_len" "sys/types.h;sys/socket.h" HAVE_SA_LEN)
-if(HAVE_SA_LEN)
-	add_definitions(-DHAVE_SA_LEN)
-endif()
-
-check_struct_has_member("struct sockaddr_in" "sin_len" "sys/types.h;netinet/in.h" HAVE_SIN_LEN)
-if(HAVE_SIN_LEN)
-	add_definitions(-DHAVE_SIN_LEN)
-endif()
-
-check_struct_has_member("struct sockaddr_in6" "sin6_len" "sys/types.h;netinet/in.h" HAVE_SIN6_LEN)
-if(HAVE_SIN6_LEN)
-	add_definitions(-DHAVE_SIN6_LEN)
-endif()
-
-
-#################################################
-# CHECK OPTIONS
-#################################################
-
-option(SCTP_DEBUG "Provide debug information" 0)
-if (SCTP_DEBUG)
-	add_definitions(-DSCTP_DEBUG)
-endif()
-
-option(INET "Support IPv4 " 1)
-if (INET)
-	add_definitions(-DINET)
-endif()
-
-option(INET6 "Support IPv6 " 1)
-if (INET6)
-	add_definitions(-DINET6)
-endif()
-
-option(LINK_STATIC "Link static" 0)
-# xxx enable W32 support for shared lib ...
-if (LINK_STATIC OR WIN32)
-	set(LINK_STATIC "usrsctp-static")
-else()
-	set(LINK_STATIC "usrsctp")
-endif()
-
-option(WERROR "Warning as error" ON)
 
 #################################################
 # OS DEPENDENT
 #################################################
 
-if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+if (CMAKE_SYSTEM_NAME MATCHES "Linux")
 	add_definitions(-D_GNU_SOURCE)
-endif()
+endif ()
 
-if (${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
-	add_definitions(-DHAVE_SCONN_LEN)
-endif()
-
-if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-	add_definitions(-DHAVE_SCONN_LEN)
+if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
 	add_definitions(-D__APPLE_USE_RFC_2292)
-endif()
-
-if (${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD")
-	add_definitions(-DHAVE_SCONN_LEN)
-endif()
+endif ()
 
 
 #################################################
 # MISC
 #################################################
 
-FIND_PACKAGE(Threads)
+find_package(Threads)
 
 
 #################################################
 # PROGRAMS
 #################################################
 
-SET (check_PROGRAMS
+set(check_programs
+	chargen_server_upcall.c
 	client.c
-	datachan_serv.c
+	client_upcall.c
 	daytime_server.c
+	daytime_server_upcall.c
 	discard_server.c
+	discard_server_upcall.c
 	echo_server.c
+	echo_server_upcall.c
 	ekr_client.c
 	ekr_loop.c
+	ekr_loop_offload.c
+	ekr_loop_upcall.c
 	ekr_peer.c
 	ekr_server.c
+	http_client.c
+	http_client_upcall.c
 	rtcweb.c
+	test_libmgmt.c
+	test_timer.c
 	tsctp.c
 )
 
-FOREACH (source_file ${check_PROGRAMS})
-	GET_FILENAME_COMPONENT (source_file_we ${source_file} NAME_WE)
-	ADD_EXECUTABLE (
+foreach (source_file ${check_programs})
+	get_filename_component(source_file_we ${source_file} NAME_WE)
+	add_executable(
 		${source_file_we}
 		${source_file}
 	)
 
-	TARGET_LINK_LIBRARIES (${source_file_we}
-		${LINK_STATIC}
+	target_link_libraries(
+		${source_file_we}
+		${programs_link_library}
 		${CMAKE_THREAD_LIBS_INIT}
 	)
-
-	ADD_TEST (${source_file_we} ${source_file_we})
-
-	IF ("x${CMAKE_C_COMPILER_ID}" STREQUAL "xClang" OR "x${CMAKE_C_COMPILER_ID}" STREQUAL "xGNU")
-		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -pedantic -Wall -std=c99")
-		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -pedantic -Wall -std=c99")
-		if (WERROR)
-			set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
-			set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
-		endif()
-	ENDIF ()
-
-	IF ("x${CMAKE_C_COMPILER_ID}" STREQUAL "xMSVC")
-		IF (CMAKE_C_FLAGS MATCHES "/W[0-4]")
-			STRING(REGEX REPLACE "/W[0-4]" "/W3" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
-		ELSE ()
-			SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W3")
-		ENDIF ()
-
-		IF (WERROR)
-			SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /WX")
-		ENDIF()
-
-
-	ENDIF ()
-ENDFOREACH ()
+endforeach ()

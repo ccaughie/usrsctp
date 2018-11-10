@@ -40,6 +40,7 @@
 #include <netinet/sctp_input.h>
 #include <netinet/sctp_peeloff.h>
 #include <netinet/sctp_callout.h>
+#include <netinet/sctp_crc32.h>
 #ifdef INET6
 #include <netinet6/sctp6_var.h>
 #endif
@@ -79,7 +80,7 @@ extern int sctp_sosend(struct socket *so, struct sockaddr *addr, struct uio *uio
 extern int sctp_attach(struct socket *so, int proto, uint32_t vrf_id);
 extern int sctpconn_attach(struct socket *so, int proto, uint32_t vrf_id);
 
-static void init_sync() {
+static void init_sync(void) {
 #if defined(__Userspace_os_Windows)
 #if defined(INET) || defined(INET6)
 	WSADATA wsaData;
@@ -392,9 +393,7 @@ soisdisconnecting(struct socket *so)
  * timeo identifier.
  */
 void
-wakeup(ident, so)
-	void *ident;
-	struct socket *so;
+wakeup(void *ident, struct socket *so)
 {
 	SOCK_LOCK(so);
 #if defined (__Userspace_os_Windows)
@@ -412,8 +411,7 @@ wakeup(ident, so)
  * swapped out.
  */
 void
-wakeup_one(ident)
-	void *ident;
+wakeup_one(void *ident)
 {
 	/* __Userspace__ Check: We are using accept_cond for wakeup_one.
 	  It seems that wakeup_one is only called within
@@ -598,13 +596,13 @@ struct sctp_generic_recvmsg_args {
    Source: /src/sys/gnu/fs/xfs/FreeBSD/xfs_ioctl.c
  */
 static __inline__ int
-copy_to_user(void *dst, void *src, int len) {
+copy_to_user(void *dst, void *src, size_t len) {
 	memcpy(dst, src, len);
 	return 0;
 }
 
 static __inline__ int
-copy_from_user(void *dst, void *src, int len) {
+copy_from_user(void *dst, void *src, size_t len) {
 	memcpy(dst, src, len);
 	return 0;
 }
@@ -648,7 +646,7 @@ int
 uiomove(void *cp, int n, struct uio *uio)
 {
 	struct iovec *iov;
-	int cnt;
+	size_t cnt;
 	int error = 0;
 
 	if ((uio->uio_rw != UIO_READ) &&
@@ -664,7 +662,7 @@ uiomove(void *cp, int n, struct uio *uio)
 			uio->uio_iovcnt--;
 			continue;
 		}
-		if (cnt > n)
+		if (cnt > (size_t)n)
 			cnt = n;
 
 		switch (uio->uio_segflg) {
@@ -680,17 +678,17 @@ uiomove(void *cp, int n, struct uio *uio)
 
 		case UIO_SYSSPACE:
 			if (uio->uio_rw == UIO_READ)
-				bcopy(cp, iov->iov_base, cnt);
+				memcpy(iov->iov_base, cp, cnt);
 			else
-				bcopy(iov->iov_base, cp, cnt);
+				memcpy(cp, iov->iov_base, cnt);
 			break;
 		}
 		iov->iov_base = (char *)iov->iov_base + cnt;
 		iov->iov_len -= cnt;
 		uio->uio_resid -= cnt;
-		uio->uio_offset += cnt;
+		uio->uio_offset += (off_t)cnt;
 		cp = (char *)cp + cnt;
-		n -= cnt;
+		n -= (int)cnt;
 	}
 out:
 	return (error);
@@ -699,10 +697,7 @@ out:
 
 /* Source: src/sys/kern/uipc_syscalls.c */
 int
-getsockaddr(namp, uaddr, len)
-	struct sockaddr **namp;
-	caddr_t uaddr;
-	size_t len;
+getsockaddr(struct sockaddr **namp, caddr_t uaddr, size_t len)
 {
 	struct sockaddr *sa;
 	int error;
@@ -722,6 +717,52 @@ getsockaddr(namp, uaddr, len)
 		*namp = sa;
 	}
 	return (error);
+}
+
+int
+usrsctp_getsockopt(struct socket *so, int level, int option_name,
+                   void *option_value, socklen_t *option_len);
+
+sctp_assoc_t
+usrsctp_getassocid(struct socket *sock, struct sockaddr *sa)
+{
+	struct sctp_paddrinfo sp;
+	socklen_t siz;
+#ifndef HAVE_SA_LEN
+	size_t sa_len;
+#endif
+
+	/* First get the assoc id */
+	siz = sizeof(sp);
+	memset(&sp, 0, sizeof(sp));
+#ifdef HAVE_SA_LEN
+	memcpy((caddr_t)&sp.spinfo_address, sa, sa->sa_len);
+#else
+	switch (sa->sa_family) {
+#ifdef INET
+	case AF_INET:
+		sa_len = sizeof(struct sockaddr_in);
+		break;
+#endif
+#ifdef INET6
+	case AF_INET6:
+		sa_len = sizeof(struct sockaddr_in6);
+		break;
+#endif
+	case AF_CONN:
+		sa_len = sizeof(struct sockaddr_conn);
+		break;
+	default:
+		sa_len = 0;
+		break;
+	}
+	memcpy((caddr_t)&sp.spinfo_address, sa, sa_len);
+#endif
+	if (usrsctp_getsockopt(sock, IPPROTO_SCTP, SCTP_GET_PEER_ADDR_INFO, &sp, &siz) != 0) {
+		/* We depend on the fact that 0 can never be returned */
+		return ((sctp_assoc_t) 0);
+	}
+	return (sp.spinfo_assoc_id);
 }
 
 
@@ -822,6 +863,7 @@ usrsctp_sendvec(struct socket *so,
 	struct uio auio;
 	int use_sinfo;
 	int len;
+	sctp_assoc_t *assoc_id;
 
 	if (so == NULL) {
 		errno = EBADF;
@@ -832,6 +874,7 @@ usrsctp_sendvec(struct socket *so,
 		return (-1);
 	}
 	memset(&sinfo, 0, sizeof(struct sctp_sndrcvinfo));
+	assoc_id = NULL;
 	use_sinfo = 0;
 	switch (infotype) {
 	case SCTP_SENDV_NOINFO:
@@ -850,6 +893,7 @@ usrsctp_sendvec(struct socket *so,
 		sinfo.sinfo_ppid = ((struct sctp_sndinfo *)info)->snd_ppid;
 		sinfo.sinfo_context = ((struct sctp_sndinfo *)info)->snd_context;
 		sinfo.sinfo_assoc_id = ((struct sctp_sndinfo *)info)->snd_assoc_id;
+		assoc_id = &(((struct sctp_sndinfo *)info)->snd_assoc_id);
 		use_sinfo = 1;
 		break;
 	case SCTP_SENDV_PRINFO:
@@ -876,6 +920,7 @@ usrsctp_sendvec(struct socket *so,
 			sinfo.sinfo_ppid = ((struct sctp_sendv_spa *)info)->sendv_sndinfo.snd_ppid;
 			sinfo.sinfo_context = ((struct sctp_sendv_spa *)info)->sendv_sndinfo.snd_context;
 			sinfo.sinfo_assoc_id = ((struct sctp_sendv_spa *)info)->sendv_sndinfo.snd_assoc_id;
+			assoc_id = &(((struct sctp_sendv_spa *)info)->sendv_sndinfo.snd_assoc_id);
 		} else {
 			sinfo.sinfo_flags = 0;
 			sinfo.sinfo_stream = 0;
@@ -903,7 +948,7 @@ usrsctp_sendvec(struct socket *so,
 
 	len = iovec_len(iov, iovcnt);
 
-	auio.uio_iov =  (struct iovec*)iov;
+	auio.uio_iov = (struct iovec *)iov;
 	auio.uio_iovcnt = iovcnt;
 	auio.uio_segflg = UIO_USERSPACE;
 	auio.uio_rw = UIO_WRITE;
@@ -911,6 +956,9 @@ usrsctp_sendvec(struct socket *so,
 	auio.uio_resid = len;
 	errno = sctp_lower_sosend(so, to, &auio, NULL, NULL, flags, use_sinfo ? &sinfo : NULL);
 	if (errno == 0) {
+		if ((to != NULL) && (assoc_id != NULL)) {
+			*assoc_id = usrsctp_getassocid(so, to);
+		}
 		return (len - auio.uio_resid);
 	} else {
 		return (-1);
@@ -959,7 +1007,7 @@ userspace_sctp_sendmbuf(struct socket *so,
           struct iovec iov[1]; */
     int error = 0;
     int uflags = 0;
-    int retvalsendmsg;
+    ssize_t retval;
 
     sinfo->sinfo_ppid = ppid;
     sinfo->sinfo_flags = flags;
@@ -989,16 +1037,16 @@ userspace_sctp_sendmbuf(struct socket *so,
 sendmsg_return:
     /* TODO: Needs a condition for non-blocking when error is EWOULDBLOCK */
     if (0 == error)
-        retvalsendmsg = len;
+        retval = len;
     else if (error == EWOULDBLOCK) {
         errno = EWOULDBLOCK;
-        retvalsendmsg = (-1);
+        retval = -1;
     } else {
         SCTP_PRINTF("%s: error = %d\n", __func__, error);
         errno = error;
-        retvalsendmsg = (-1);
+        retval = -1;
     }
-    return retvalsendmsg;
+    return (retval);
 
 }
 
@@ -1024,7 +1072,8 @@ userspace_sctp_recvmsg(struct socket *so,
 	struct iovec *tiov;
 	int iovlen = 1;
 	int error = 0;
-	int ulen, i, retval;
+	ssize_t ulen;
+	int i;
 	socklen_t fromlen;
 
 	iov[0].iov_base = dbuf;
@@ -1055,7 +1104,7 @@ userspace_sctp_recvmsg(struct socket *so,
 		    (struct sctp_sndrcvinfo *)sinfo, 1);
 
 	if (error) {
-		if (auio.uio_resid != (int)ulen &&
+		if ((auio.uio_resid != ulen) &&
 		    (error == EINTR ||
 #if !defined(__Userspace_os_NetBSD)
 		     error == ERESTART ||
@@ -1087,10 +1136,9 @@ userspace_sctp_recvmsg(struct socket *so,
 			*fromlenp = fromlen;
 		}
 	}
-	if (error == 0){
+	if (error == 0) {
 		/* ready return value */
-		retval = (int)ulen - auio.uio_resid;
-		return (retval);
+		return (ulen - auio.uio_resid);
 	} else {
 		SCTP_PRINTF("%s: error = %d\n", __func__, error);
 		return (-1);
@@ -1112,7 +1160,8 @@ usrsctp_recvv(struct socket *so,
 	struct iovec iov[SCTP_SMALL_IOVEC_SIZE];
 	struct iovec *tiov;
 	int iovlen = 1;
-	int ulen, i;
+	ssize_t ulen;
+	int i;
 	socklen_t fromlen;
 	struct sctp_rcvinfo *rcv;
 	struct sctp_recvv_rn *rn;
@@ -1148,7 +1197,7 @@ usrsctp_recvv(struct socket *so,
 		    from, fromlen, msg_flags,
 		    (struct sctp_sndrcvinfo *)&seinfo, 1);
 	if (errno) {
-		if (auio.uio_resid != (int)ulen &&
+		if ((auio.uio_resid != ulen) &&
 		    (errno == EINTR ||
 #if !defined(__Userspace_os_NetBSD)
 		     errno == ERESTART ||
@@ -1156,6 +1205,9 @@ usrsctp_recvv(struct socket *so,
 		     errno == EWOULDBLOCK)) {
 			errno = 0;
 		}
+	}
+	if (errno != 0) {
+		goto out;
 	}
 	if ((*msg_flags & MSG_NOTIFICATION) == 0) {
 		struct sctp_inpcb *inp;
@@ -1208,7 +1260,10 @@ usrsctp_recvv(struct socket *so,
 			*infolen = 0;
 		}
 	}
-	if ((fromlenp != NULL) && (fromlen > 0) && (from != NULL)) {
+	if ((fromlenp != NULL) &&
+	    (fromlen > 0) &&
+	    (from != NULL) &&
+	    (ulen > auio.uio_resid)) {
 		switch (from->sa_family) {
 #if defined(INET)
 		case AF_INET:
@@ -1231,9 +1286,10 @@ usrsctp_recvv(struct socket *so,
 			*fromlenp = fromlen;
 		}
 	}
+out:
 	if (errno == 0) {
 		/* ready return value */
-		return ((int)ulen - auio.uio_resid);
+		return (ulen - auio.uio_resid);
 	} else {
 		return (-1);
 	}
@@ -1414,7 +1470,7 @@ usrsctp_socket(int domain, int type, int protocol,
 {
 	struct socket *so;
 
-	if ((protocol = IPPROTO_SCTP) && (SCTP_BASE_VAR(sctp_pcb_initialized) == 0)) {
+	if ((protocol == IPPROTO_SCTP) && (SCTP_BASE_VAR(sctp_pcb_initialized) == 0)) {
 		errno = EPROTONOSUPPORT;
 		return (NULL);
 	}
@@ -1930,7 +1986,7 @@ accept1(struct socket *so, struct sockaddr *aname, socklen_t *anamelen, struct s
 struct socket *
 usrsctp_accept(struct socket *so, struct sockaddr *aname, socklen_t *anamelen)
 {
-	struct socket *accept_return_sock;
+	struct socket *accept_return_sock = NULL;
 
 	errno = accept1(so, aname, anamelen, &accept_return_sock);
 	if (errno) {
@@ -2022,46 +2078,6 @@ usrsctp_get_non_blocking(struct socket *so)
 	}
 	SOCK_UNLOCK(so);
 	return (result);
-}
-
-int
-usrsctp_get_events(struct socket *so)
-{
-	int events = 0;
-
-	if (so == NULL) {
-		errno = EBADF;
-		return -1;
-	}
-
-	if (soreadable(so)) {
-		events |= SCTP_EVENT_READ;
-	}
-	if (sowriteable(so)) {
-		events |= SCTP_EVENT_WRITE;
-	}
-	if (so->so_error) {
-		events |= SCTP_EVENT_ERROR;
-	}
-	return events;
-}
-
-int
-usrsctp_set_upcall(struct socket *so, void (*upcall)(struct socket *, void *, int), void *arg)
-{
-	if (so == NULL) {
-		errno = EBADF;
-		return (-1);
-	}
-
-	SOCK_LOCK(so);
-	so->so_upcall = upcall;
-	so->so_upcallarg = arg;
-	so->so_snd.sb_flags |= SB_UPCALL;
-	so->so_rcv.sb_flags |= SB_UPCALL;
-	SOCK_UNLOCK(so);
-
-	return (0);
 }
 
 int
@@ -2484,6 +2500,121 @@ userspace_getsockopt(struct socket *so, int level, int option_name,
 }
 
 int
+usrsctp_opt_info(struct socket *so, sctp_assoc_t id, int opt, void *arg, socklen_t *size)
+{
+	if (arg == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+	if ((id == SCTP_CURRENT_ASSOC) ||
+	    (id == SCTP_ALL_ASSOC)) {
+		errno = EINVAL;
+		return (-1);
+	}
+	switch (opt) {
+	case SCTP_RTOINFO:
+		((struct sctp_rtoinfo *)arg)->srto_assoc_id = id;
+		break;
+	case SCTP_ASSOCINFO:
+		((struct sctp_assocparams *)arg)->sasoc_assoc_id = id;
+		break;
+	case SCTP_DEFAULT_SEND_PARAM:
+		((struct sctp_assocparams *)arg)->sasoc_assoc_id = id;
+		break;
+	case SCTP_PRIMARY_ADDR:
+		((struct sctp_setprim *)arg)->ssp_assoc_id = id;
+		break;
+	case SCTP_PEER_ADDR_PARAMS:
+		((struct sctp_paddrparams *)arg)->spp_assoc_id = id;
+		break;
+	case SCTP_MAXSEG:
+		((struct sctp_assoc_value *)arg)->assoc_id = id;
+		break;
+	case SCTP_AUTH_KEY:
+		((struct sctp_authkey *)arg)->sca_assoc_id = id;
+		break;
+	case SCTP_AUTH_ACTIVE_KEY:
+		((struct sctp_authkeyid *)arg)->scact_assoc_id = id;
+		break;
+	case SCTP_DELAYED_SACK:
+		((struct sctp_sack_info *)arg)->sack_assoc_id = id;
+		break;
+	case SCTP_CONTEXT:
+		((struct sctp_assoc_value *)arg)->assoc_id = id;
+		break;
+	case SCTP_STATUS:
+		((struct sctp_status *)arg)->sstat_assoc_id = id;
+		break;
+	case SCTP_GET_PEER_ADDR_INFO:
+		((struct sctp_paddrinfo *)arg)->spinfo_assoc_id = id;
+		break;
+	case SCTP_PEER_AUTH_CHUNKS:
+		((struct sctp_authchunks *)arg)->gauth_assoc_id = id;
+		break;
+	case SCTP_LOCAL_AUTH_CHUNKS:
+		((struct sctp_authchunks *)arg)->gauth_assoc_id = id;
+		break;
+	case SCTP_TIMEOUTS:
+		((struct sctp_timeouts *)arg)->stimo_assoc_id = id;
+		break;
+	case SCTP_EVENT:
+		((struct sctp_event *)arg)->se_assoc_id = id;
+		break;
+	case SCTP_DEFAULT_SNDINFO:
+		((struct sctp_sndinfo *)arg)->snd_assoc_id = id;
+		break;
+	case SCTP_DEFAULT_PRINFO:
+		((struct sctp_default_prinfo *)arg)->pr_assoc_id = id;
+		break;
+	case SCTP_PEER_ADDR_THLDS:
+		((struct sctp_paddrthlds *)arg)->spt_assoc_id = id;
+		break;
+	case SCTP_REMOTE_UDP_ENCAPS_PORT:
+		((struct sctp_udpencaps *)arg)->sue_assoc_id = id;
+		break;
+	case SCTP_ECN_SUPPORTED:
+		((struct sctp_assoc_value *)arg)->assoc_id = id;
+		break;
+	case SCTP_PR_SUPPORTED:
+		((struct sctp_assoc_value *)arg)->assoc_id = id;
+		break;
+	case SCTP_AUTH_SUPPORTED:
+		((struct sctp_assoc_value *)arg)->assoc_id = id;
+		break;
+	case SCTP_ASCONF_SUPPORTED:
+		((struct sctp_assoc_value *)arg)->assoc_id = id;
+		break;
+	case SCTP_RECONFIG_SUPPORTED:
+		((struct sctp_assoc_value *)arg)->assoc_id = id;
+		break;
+	case SCTP_NRSACK_SUPPORTED:
+		((struct sctp_assoc_value *)arg)->assoc_id = id;
+		break;
+	case SCTP_PKTDROP_SUPPORTED:
+		((struct sctp_assoc_value *)arg)->assoc_id = id;
+		break;
+	case SCTP_MAX_BURST:
+		((struct sctp_assoc_value *)arg)->assoc_id = id;
+		break;
+	case SCTP_ENABLE_STREAM_RESET:
+		((struct sctp_assoc_value *)arg)->assoc_id = id;
+		break;
+	case SCTP_PR_STREAM_STATUS:
+		((struct sctp_prstatus *)arg)->sprstat_assoc_id = id;
+		break;
+	case SCTP_PR_ASSOC_STATUS:
+		((struct sctp_prstatus *)arg)->sprstat_assoc_id = id;
+		break;
+	case SCTP_MAX_CWND:
+		((struct sctp_assoc_value *)arg)->assoc_id = id;
+		break;
+	default:
+		break;
+	}
+	return (usrsctp_getsockopt(so, IPPROTO_SCTP, opt, arg, size));
+}
+
+int
 usrsctp_set_ulpinfo(struct socket *so, void *ulp_info)
 {
 	return (register_ulp_info(so, ulp_info));
@@ -2599,6 +2730,24 @@ usrsctp_bindx(struct socket *so, struct sockaddr *addrs, int addrcnt, int flags)
 		gaddrs->sget_assoc_id = 0;
 #ifdef HAVE_SA_LEN
 		memcpy(gaddrs->addr, sa, sa->sa_len);
+#if defined(INET) || defined(INET6)
+		if ((i == 0) && (sport != 0)) {
+			switch (gaddrs->addr->sa_family) {
+#ifdef INET
+			case AF_INET:
+				sin = (struct sockaddr_in *)gaddrs->addr;
+				sin->sin_port = sport;
+				break;
+#endif
+#ifdef INET6
+			case AF_INET6:
+				sin6 = (struct sockaddr_in6 *)gaddrs->addr;
+				sin6->sin6_port = sport;
+				break;
+#endif
+			}
+		}
+#endif
 		if (usrsctp_setsockopt(so, IPPROTO_SCTP, flags, gaddrs, (socklen_t)argsz) != 0) {
 			free(gaddrs);
 			return (-1);
@@ -2687,9 +2836,13 @@ usrsctp_connectx(struct socket *so,
 				return (-1);
 			}
 #endif
+			len += sizeof(struct sockaddr_in);
+			if (len > SCTP_STACK_BUF_SIZE) {
+				errno = ENOMEM;
+				return (-1);
+			}
 			memcpy(cpto, at, sizeof(struct sockaddr_in));
 			cpto = ((caddr_t)cpto + sizeof(struct sockaddr_in));
-			len += sizeof(struct sockaddr_in);
 			at = (struct sockaddr *)((caddr_t)at + sizeof(struct sockaddr_in));
 			break;
 #endif
@@ -2703,18 +2856,30 @@ usrsctp_connectx(struct socket *so,
 #endif
 #ifdef INET
 			if (IN6_IS_ADDR_V4MAPPED(&((struct sockaddr_in6 *)at)->sin6_addr)) {
+				len += sizeof(struct sockaddr_in);
+				if (len > SCTP_STACK_BUF_SIZE) {
+					errno = ENOMEM;
+					return (-1);
+				}
 				in6_sin6_2_sin((struct sockaddr_in *)cpto, (struct sockaddr_in6 *)at);
 				cpto = ((caddr_t)cpto + sizeof(struct sockaddr_in));
-				len += sizeof(struct sockaddr_in);
 			} else {
+				len += sizeof(struct sockaddr_in6);
+				if (len > SCTP_STACK_BUF_SIZE) {
+					errno = ENOMEM;
+					return (-1);
+				}
 				memcpy(cpto, at, sizeof(struct sockaddr_in6));
 				cpto = ((caddr_t)cpto + sizeof(struct sockaddr_in6));
-				len += sizeof(struct sockaddr_in6);
 			}
 #else
+			len += sizeof(struct sockaddr_in6);
+			if (len > SCTP_STACK_BUF_SIZE) {
+				errno = ENOMEM;
+				return (-1);
+			}
 			memcpy(cpto, at, sizeof(struct sockaddr_in6));
 			cpto = ((caddr_t)cpto + sizeof(struct sockaddr_in6));
-			len += sizeof(struct sockaddr_in6);
 #endif
 			at = (struct sockaddr *)((caddr_t)at + sizeof(struct sockaddr_in6));
 			break;
@@ -2723,17 +2888,7 @@ usrsctp_connectx(struct socket *so,
 			errno = EINVAL;
 			return (-1);
 		}
-		if (len > (sizeof(buf) - sizeof(int))) {
-			/* Never enough memory */
-			errno = E2BIG;
-			return (-1);
-		}
 		cnt++;
-	}
-	/* do we have any? */
-	if (cnt == 0) {
-		errno = EINVAL;
-		return (-1);
 	}
 	aa = (int *)buf;
 	*aa = cnt;
@@ -2928,7 +3083,7 @@ sctp_userspace_ip_output(int *result, struct mbuf *o_pak,
 	struct sockaddr_in dst;
 #if defined (__Userspace_os_Windows)
 	WSAMSG win_msg_hdr;
-	int win_sent_len;
+	DWORD win_sent_len;
 	WSABUF send_iovec[MAXLEN_MBUF_CHAIN];
 	WSABUF winbuf;
 #else
@@ -2975,7 +3130,6 @@ sctp_userspace_ip_output(int *result, struct mbuf *o_pak,
 #if defined(__Userspace_os_Linux) || defined (__Userspace_os_Windows) || (defined(__Userspace_os_FreeBSD) && (__FreeBSD_version >= 1100030))
 		/* need to put certain fields into network order for Linux */
 		ip->ip_len = htons(ip->ip_len);
-		ip->ip_off = 0;
 #endif
 	}
 
@@ -3024,12 +3178,12 @@ sctp_userspace_ip_output(int *result, struct mbuf *o_pak,
 	msg_hdr.msg_controllen = 0;
 	msg_hdr.msg_flags = 0;
 
-	if ((!use_udp_tunneling) && (SCTP_BASE_VAR(userspace_rawsctp) > -1)) {
+	if ((!use_udp_tunneling) && (SCTP_BASE_VAR(userspace_rawsctp) != -1)) {
 		if ((res = sendmsg(SCTP_BASE_VAR(userspace_rawsctp), &msg_hdr, MSG_DONTWAIT)) != send_len) {
 			*result = errno;
 		}
 	}
-	if ((use_udp_tunneling) && (SCTP_BASE_VAR(userspace_udpsctp) > -1)) {
+	if ((use_udp_tunneling) && (SCTP_BASE_VAR(userspace_udpsctp) != -1)) {
 		if ((res = sendmsg(SCTP_BASE_VAR(userspace_udpsctp), &msg_hdr, MSG_DONTWAIT)) != send_len) {
 			*result = errno;
 		}
@@ -3044,14 +3198,14 @@ sctp_userspace_ip_output(int *result, struct mbuf *o_pak,
 	win_msg_hdr.Control = winbuf;
 	win_msg_hdr.dwFlags = 0;
 
-	if ((!use_udp_tunneling) && (SCTP_BASE_VAR(userspace_rawsctp) > -1)) {
+	if ((!use_udp_tunneling) && (SCTP_BASE_VAR(userspace_rawsctp) != -1)) {
 		if (WSASendTo(SCTP_BASE_VAR(userspace_rawsctp), (LPWSABUF) send_iovec, iovcnt, &win_sent_len, win_msg_hdr.dwFlags, win_msg_hdr.name, (int) win_msg_hdr.namelen, NULL, NULL) != 0) {
 			*result = WSAGetLastError();
 		} else if (win_sent_len != send_len) {
 			*result = WSAGetLastError();
 		}
 	}
-	if ((use_udp_tunneling) && (SCTP_BASE_VAR(userspace_udpsctp) > -1)) {
+	if ((use_udp_tunneling) && (SCTP_BASE_VAR(userspace_udpsctp) != -1)) {
 		if (WSASendTo(SCTP_BASE_VAR(userspace_udpsctp), (LPWSABUF) send_iovec, iovcnt, &win_sent_len, win_msg_hdr.dwFlags, win_msg_hdr.name, (int) win_msg_hdr.namelen, NULL, NULL) != 0) {
 			*result = WSAGetLastError();
 		} else if (win_sent_len != send_len) {
@@ -3083,7 +3237,7 @@ void sctp_userspace_ip6_output(int *result, struct mbuf *o_pak,
 	struct sockaddr_in6 dst;
 #if defined (__Userspace_os_Windows)
 	WSAMSG win_msg_hdr;
-	int win_sent_len;
+	DWORD win_sent_len;
 	WSABUF send_iovec[MAXLEN_MBUF_CHAIN];
 	WSABUF winbuf;
 #else
@@ -3129,10 +3283,6 @@ void sctp_userspace_ip6_output(int *result, struct mbuf *o_pak,
 			SCTP_PRINTF("Why did the SCTP implementation did not choose a source address?\n");
 		}
 		/* TODO need to worry about ro->ro_dst as in ip_output? */
-#if defined(__Userspace_os_Linux) || defined (__Userspace_os_Windows)
-		/* need to put certain fields into network order for Linux */
-		ip6->ip6_plen = htons(ip6->ip6_plen);
-#endif
 	}
 
 	memset((void *)&dst, 0, sizeof(struct sockaddr_in6));
@@ -3182,12 +3332,12 @@ void sctp_userspace_ip6_output(int *result, struct mbuf *o_pak,
 	msg_hdr.msg_controllen = 0;
 	msg_hdr.msg_flags = 0;
 
-	if ((!use_udp_tunneling) && (SCTP_BASE_VAR(userspace_rawsctp6) > -1)) {
+	if ((!use_udp_tunneling) && (SCTP_BASE_VAR(userspace_rawsctp6) != -1)) {
 		if ((res = sendmsg(SCTP_BASE_VAR(userspace_rawsctp6), &msg_hdr, MSG_DONTWAIT)) != send_len) {
 			*result = errno;
 		}
 	}
-	if ((use_udp_tunneling) && (SCTP_BASE_VAR(userspace_udpsctp6) > -1)) {
+	if ((use_udp_tunneling) && (SCTP_BASE_VAR(userspace_udpsctp6) != -1)) {
 		if ((res = sendmsg(SCTP_BASE_VAR(userspace_udpsctp6), &msg_hdr, MSG_DONTWAIT)) != send_len) {
 			*result = errno;
 		}
@@ -3202,14 +3352,14 @@ void sctp_userspace_ip6_output(int *result, struct mbuf *o_pak,
 	win_msg_hdr.Control = winbuf;
 	win_msg_hdr.dwFlags = 0;
 
-	if ((!use_udp_tunneling) && (SCTP_BASE_VAR(userspace_rawsctp6) > -1)) {
+	if ((!use_udp_tunneling) && (SCTP_BASE_VAR(userspace_rawsctp6) != -1)) {
 		if (WSASendTo(SCTP_BASE_VAR(userspace_rawsctp6), (LPWSABUF) send_iovec, iovcnt, &win_sent_len, win_msg_hdr.dwFlags, win_msg_hdr.name, (int) win_msg_hdr.namelen, NULL, NULL) != 0) {
 			*result = WSAGetLastError();
 		} else if (win_sent_len != send_len) {
 			*result = WSAGetLastError();
 		}
 	}
-	if ((use_udp_tunneling) && (SCTP_BASE_VAR(userspace_udpsctp6) > -1)) {
+	if ((use_udp_tunneling) && (SCTP_BASE_VAR(userspace_udpsctp6) != -1)) {
 		if (WSASendTo(SCTP_BASE_VAR(userspace_udpsctp6), (LPWSABUF) send_iovec, iovcnt, &win_sent_len, win_msg_hdr.dwFlags, win_msg_hdr.name, (int) win_msg_hdr.namelen, NULL, NULL) != 0) {
 			*result = WSAGetLastError();
 		} else if (win_sent_len != send_len) {
@@ -3273,12 +3423,11 @@ usrsctp_dumppacket(const void *buf, size_t len, int outbound)
 {
 	size_t i, pos;
 	char *dump_buf, *packet;
+	struct tm t;
 #ifdef _MSC_VER
 	struct timeb tb;
-	struct tm t;
 #else
 	struct timeval tv;
-	struct tm *t;
 	time_t sec;
 #endif
 
@@ -3298,10 +3447,10 @@ usrsctp_dumppacket(const void *buf, size_t len, int outbound)
 #else
 	gettimeofday(&tv, NULL);
 	sec = (time_t)tv.tv_sec;
-	t = localtime((const time_t *)&sec);
+	localtime_r((const time_t *)&sec, &t);
 	snprintf(dump_buf, PREAMBLE_LENGTH + 1, PREAMBLE_FORMAT,
 	         outbound ? 'O' : 'I',
-	         t->tm_hour, t->tm_min, t->tm_sec, (long)tv.tv_usec);
+	         t.tm_hour, t.tm_min, t.tm_sec, (long)tv.tv_usec);
 #endif
 	pos += PREAMBLE_LENGTH;
 #ifdef _MSC_VER
@@ -3338,6 +3487,29 @@ usrsctp_freedumpbuffer(char *buf)
 }
 
 void
+usrsctp_enable_crc32c_offload(void)
+{
+	SCTP_BASE_VAR(crc32c_offloaded) = 1;
+}
+
+void
+usrsctp_disable_crc32c_offload(void)
+{
+	SCTP_BASE_VAR(crc32c_offloaded) = 0;
+}
+
+/* Compute the CRC32C in network byte order */
+uint32_t
+usrsctp_crc32c(void *buffer, size_t length)
+{
+	uint32_t base = 0xffffffff;
+
+	base = calculate_crc32c(0xffffffff, (unsigned char *)buffer, (unsigned int) length);
+	base = sctp_finalize_crc32c(base);
+	return (base);
+}
+
+void
 usrsctp_conninput(void *addr, const void *buffer, size_t length, uint8_t ecn_bits)
 {
 	struct sockaddr_conn src, dst;
@@ -3359,10 +3531,10 @@ usrsctp_conninput(void *addr, const void *buffer, size_t length, uint8_t ecn_bit
 	dst.sconn_len = sizeof(struct sockaddr_conn);
 #endif
 	dst.sconn_addr = addr;
-	if ((m = sctp_get_mbuf_for_msg(length, 1, M_NOWAIT, 0, MT_DATA)) == NULL) {
+	if ((m = sctp_get_mbuf_for_msg((unsigned int)length, 1, M_NOWAIT, 0, MT_DATA)) == NULL) {
 		return;
 	}
-	m_copyback(m, 0, length, (caddr_t)buffer);
+	m_copyback(m, 0, (int)length, (caddr_t)buffer);
 	if (SCTP_BUF_LEN(m) < (int)(sizeof(struct sctphdr) + sizeof(struct sctp_chunkhdr))) {
 		if ((m = m_pullup(m, sizeof(struct sctphdr) + sizeof(struct sctp_chunkhdr))) == NULL) {
 			SCTP_STAT_INCR(sctps_hdrops);
@@ -3373,13 +3545,11 @@ usrsctp_conninput(void *addr, const void *buffer, size_t length, uint8_t ecn_bit
 	ch = (struct sctp_chunkhdr *)((caddr_t)sh + sizeof(struct sctphdr));
 	src.sconn_port = sh->src_port;
 	dst.sconn_port = sh->dest_port;
-	sctp_common_input_processing(&m, 0, sizeof(struct sctphdr), length,
+	sctp_common_input_processing(&m, 0, sizeof(struct sctphdr), (int)length,
 	                             (struct sockaddr *)&src,
 	                             (struct sockaddr *)&dst,
 	                             sh, ch,
-#if !defined(SCTP_WITH_NO_CSUM)
-	                             1,
-#endif
+	                             SCTP_BASE_VAR(crc32c_offloaded) == 1 ? 0 : 1,
 	                             ecn_bits,
 	                             SCTP_DEFAULT_VRFID, 0);
 	if (m) {
@@ -3393,86 +3563,154 @@ void usrsctp_fire_timer(int delta)
 	sctp_handle_tick(MSEC_TO_TICKS(delta));
 }
 
-#define USRSCTP_SYSCTL_SET_DEF(__field) \
-void usrsctp_sysctl_set_ ## __field(uint32_t value) { \
-	SCTP_BASE_SYSCTL(__field) = value; \
+int
+usrsctp_get_events(struct socket *so)
+{
+	int events = 0;
+
+	if (so == NULL) {
+		errno = EBADF;
+		return -1;
+	}
+
+	SOCK_LOCK(so);
+	if (soreadable(so)) {
+		events |= SCTP_EVENT_READ;
+	}
+	if (sowriteable(so)) {
+		events |= SCTP_EVENT_WRITE;
+	}
+	if (so->so_error) {
+		events |= SCTP_EVENT_ERROR;
+	}
+	SOCK_UNLOCK(so);
+
+	return events;
 }
 
-USRSCTP_SYSCTL_SET_DEF(sctp_sendspace)
-USRSCTP_SYSCTL_SET_DEF(sctp_recvspace)
-USRSCTP_SYSCTL_SET_DEF(sctp_auto_asconf)
-USRSCTP_SYSCTL_SET_DEF(sctp_multiple_asconfs)
-USRSCTP_SYSCTL_SET_DEF(sctp_ecn_enable)
-USRSCTP_SYSCTL_SET_DEF(sctp_pr_enable)
-USRSCTP_SYSCTL_SET_DEF(sctp_auth_enable)
-USRSCTP_SYSCTL_SET_DEF(sctp_asconf_enable)
-USRSCTP_SYSCTL_SET_DEF(sctp_reconfig_enable)
-USRSCTP_SYSCTL_SET_DEF(sctp_nrsack_enable)
-USRSCTP_SYSCTL_SET_DEF(sctp_pktdrop_enable)
-USRSCTP_SYSCTL_SET_DEF(sctp_strict_sacks)
-#if !defined(SCTP_WITH_NO_CSUM)
-USRSCTP_SYSCTL_SET_DEF(sctp_no_csum_on_loopback)
+int
+usrsctp_set_upcall(struct socket *so, void (*upcall)(struct socket *, void *, int), void *arg)
+{
+	if (so == NULL) {
+		errno = EBADF;
+		return (-1);
+	}
+
+	SOCK_LOCK(so);
+	so->so_upcall = upcall;
+	so->so_upcallarg = arg;
+	so->so_snd.sb_flags |= SB_UPCALL;
+	so->so_rcv.sb_flags |= SB_UPCALL;
+	SOCK_UNLOCK(so);
+
+	return (0);
+}
+
+#define USRSCTP_TUNABLE_SET_DEF(__field, __prefix)   \
+int usrsctp_tunable_set_ ## __field(uint32_t value)  \
+{                                                    \
+	if ((value < __prefix##_MIN) ||              \
+	    (value > __prefix##_MAX)) {              \
+		errno = EINVAL;                      \
+		return (-1);                         \
+	} else {                                     \
+		SCTP_BASE_SYSCTL(__field) = value;   \
+		return (0);                          \
+	}                                            \
+}
+
+USRSCTP_TUNABLE_SET_DEF(sctp_hashtblsize, SCTPCTL_TCBHASHSIZE)
+USRSCTP_TUNABLE_SET_DEF(sctp_pcbtblsize, SCTPCTL_PCBHASHSIZE)
+USRSCTP_TUNABLE_SET_DEF(sctp_chunkscale, SCTPCTL_CHUNKSCALE)
+
+#define USRSCTP_SYSCTL_SET_DEF(__field, __prefix)    \
+int usrsctp_sysctl_set_ ## __field(uint32_t value)   \
+{                                                    \
+	if ((value < __prefix##_MIN) ||              \
+	    (value > __prefix##_MAX)) {              \
+		errno = EINVAL;                      \
+		return (-1);                         \
+	} else {                                     \
+		SCTP_BASE_SYSCTL(__field) = value;   \
+		return (0);                          \
+	}                                            \
+}
+
+#if __GNUC__ >= 5 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wtype-limits"
 #endif
-USRSCTP_SYSCTL_SET_DEF(sctp_peer_chunk_oh)
-USRSCTP_SYSCTL_SET_DEF(sctp_max_burst_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_max_chunks_on_queue)
-USRSCTP_SYSCTL_SET_DEF(sctp_hashtblsize)
-USRSCTP_SYSCTL_SET_DEF(sctp_pcbtblsize)
-USRSCTP_SYSCTL_SET_DEF(sctp_min_split_point)
-USRSCTP_SYSCTL_SET_DEF(sctp_chunkscale)
-USRSCTP_SYSCTL_SET_DEF(sctp_delayed_sack_time_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_sack_freq_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_system_free_resc_limit)
-USRSCTP_SYSCTL_SET_DEF(sctp_asoc_free_resc_limit)
-USRSCTP_SYSCTL_SET_DEF(sctp_heartbeat_interval_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_pmtu_raise_time_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_shutdown_guard_time_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_secret_lifetime_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_rto_max_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_rto_min_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_rto_initial_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_init_rto_max_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_valid_cookie_life_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_init_rtx_max_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_assoc_rtx_max_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_path_rtx_max_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_add_more_threshold)
-USRSCTP_SYSCTL_SET_DEF(sctp_nr_outgoing_streams_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_cmt_on_off)
-USRSCTP_SYSCTL_SET_DEF(sctp_cmt_use_dac)
-USRSCTP_SYSCTL_SET_DEF(sctp_use_cwnd_based_maxburst)
-USRSCTP_SYSCTL_SET_DEF(sctp_nat_friendly)
-USRSCTP_SYSCTL_SET_DEF(sctp_L2_abc_variable)
-USRSCTP_SYSCTL_SET_DEF(sctp_mbuf_threshold_count)
-USRSCTP_SYSCTL_SET_DEF(sctp_do_drain)
-USRSCTP_SYSCTL_SET_DEF(sctp_hb_maxburst)
-USRSCTP_SYSCTL_SET_DEF(sctp_abort_if_one_2_one_hits_limit)
-USRSCTP_SYSCTL_SET_DEF(sctp_strict_data_order)
-USRSCTP_SYSCTL_SET_DEF(sctp_min_residual)
-USRSCTP_SYSCTL_SET_DEF(sctp_max_retran_chunk)
-USRSCTP_SYSCTL_SET_DEF(sctp_logging_level)
-USRSCTP_SYSCTL_SET_DEF(sctp_default_cc_module)
-USRSCTP_SYSCTL_SET_DEF(sctp_default_frag_interleave)
-USRSCTP_SYSCTL_SET_DEF(sctp_mobility_base)
-USRSCTP_SYSCTL_SET_DEF(sctp_mobility_fasthandoff)
-USRSCTP_SYSCTL_SET_DEF(sctp_inits_include_nat_friendly)
-USRSCTP_SYSCTL_SET_DEF(sctp_udp_tunneling_port)
-USRSCTP_SYSCTL_SET_DEF(sctp_enable_sack_immediately)
-USRSCTP_SYSCTL_SET_DEF(sctp_vtag_time_wait)
-USRSCTP_SYSCTL_SET_DEF(sctp_blackhole)
-USRSCTP_SYSCTL_SET_DEF(sctp_diag_info_code)
-USRSCTP_SYSCTL_SET_DEF(sctp_fr_max_burst_default)
-USRSCTP_SYSCTL_SET_DEF(sctp_path_pf_threshold)
-USRSCTP_SYSCTL_SET_DEF(sctp_default_ss_module)
-USRSCTP_SYSCTL_SET_DEF(sctp_rttvar_bw)
-USRSCTP_SYSCTL_SET_DEF(sctp_rttvar_rtt)
-USRSCTP_SYSCTL_SET_DEF(sctp_rttvar_eqret)
-USRSCTP_SYSCTL_SET_DEF(sctp_steady_step)
-USRSCTP_SYSCTL_SET_DEF(sctp_use_dccc_ecn)
-USRSCTP_SYSCTL_SET_DEF(sctp_buffer_splitting)
-USRSCTP_SYSCTL_SET_DEF(sctp_initial_cwnd)
+USRSCTP_SYSCTL_SET_DEF(sctp_sendspace, SCTPCTL_MAXDGRAM)
+USRSCTP_SYSCTL_SET_DEF(sctp_recvspace, SCTPCTL_RECVSPACE)
+USRSCTP_SYSCTL_SET_DEF(sctp_auto_asconf, SCTPCTL_AUTOASCONF)
+USRSCTP_SYSCTL_SET_DEF(sctp_ecn_enable, SCTPCTL_ECN_ENABLE)
+USRSCTP_SYSCTL_SET_DEF(sctp_pr_enable, SCTPCTL_PR_ENABLE)
+USRSCTP_SYSCTL_SET_DEF(sctp_auth_enable, SCTPCTL_AUTH_ENABLE)
+USRSCTP_SYSCTL_SET_DEF(sctp_asconf_enable, SCTPCTL_ASCONF_ENABLE)
+USRSCTP_SYSCTL_SET_DEF(sctp_reconfig_enable, SCTPCTL_RECONFIG_ENABLE)
+USRSCTP_SYSCTL_SET_DEF(sctp_nrsack_enable, SCTPCTL_NRSACK_ENABLE)
+USRSCTP_SYSCTL_SET_DEF(sctp_pktdrop_enable, SCTPCTL_PKTDROP_ENABLE)
+USRSCTP_SYSCTL_SET_DEF(sctp_no_csum_on_loopback, SCTPCTL_LOOPBACK_NOCSUM)
+USRSCTP_SYSCTL_SET_DEF(sctp_peer_chunk_oh, SCTPCTL_PEER_CHKOH)
+USRSCTP_SYSCTL_SET_DEF(sctp_max_burst_default, SCTPCTL_MAXBURST)
+USRSCTP_SYSCTL_SET_DEF(sctp_max_chunks_on_queue, SCTPCTL_MAXCHUNKS)
+USRSCTP_SYSCTL_SET_DEF(sctp_min_split_point, SCTPCTL_MIN_SPLIT_POINT)
+USRSCTP_SYSCTL_SET_DEF(sctp_delayed_sack_time_default, SCTPCTL_DELAYED_SACK_TIME)
+USRSCTP_SYSCTL_SET_DEF(sctp_sack_freq_default, SCTPCTL_SACK_FREQ)
+USRSCTP_SYSCTL_SET_DEF(sctp_system_free_resc_limit, SCTPCTL_SYS_RESOURCE)
+USRSCTP_SYSCTL_SET_DEF(sctp_asoc_free_resc_limit, SCTPCTL_ASOC_RESOURCE)
+USRSCTP_SYSCTL_SET_DEF(sctp_heartbeat_interval_default, SCTPCTL_HEARTBEAT_INTERVAL)
+USRSCTP_SYSCTL_SET_DEF(sctp_pmtu_raise_time_default, SCTPCTL_PMTU_RAISE_TIME)
+USRSCTP_SYSCTL_SET_DEF(sctp_shutdown_guard_time_default, SCTPCTL_SHUTDOWN_GUARD_TIME)
+USRSCTP_SYSCTL_SET_DEF(sctp_secret_lifetime_default, SCTPCTL_SECRET_LIFETIME)
+USRSCTP_SYSCTL_SET_DEF(sctp_rto_max_default, SCTPCTL_RTO_MAX)
+USRSCTP_SYSCTL_SET_DEF(sctp_rto_min_default, SCTPCTL_RTO_MIN)
+USRSCTP_SYSCTL_SET_DEF(sctp_rto_initial_default, SCTPCTL_RTO_INITIAL)
+USRSCTP_SYSCTL_SET_DEF(sctp_init_rto_max_default, SCTPCTL_INIT_RTO_MAX)
+USRSCTP_SYSCTL_SET_DEF(sctp_valid_cookie_life_default, SCTPCTL_VALID_COOKIE_LIFE)
+USRSCTP_SYSCTL_SET_DEF(sctp_init_rtx_max_default, SCTPCTL_INIT_RTX_MAX)
+USRSCTP_SYSCTL_SET_DEF(sctp_assoc_rtx_max_default, SCTPCTL_ASSOC_RTX_MAX)
+USRSCTP_SYSCTL_SET_DEF(sctp_path_rtx_max_default, SCTPCTL_PATH_RTX_MAX)
+USRSCTP_SYSCTL_SET_DEF(sctp_add_more_threshold, SCTPCTL_ADD_MORE_ON_OUTPUT)
+USRSCTP_SYSCTL_SET_DEF(sctp_nr_incoming_streams_default, SCTPCTL_INCOMING_STREAMS)
+USRSCTP_SYSCTL_SET_DEF(sctp_nr_outgoing_streams_default, SCTPCTL_OUTGOING_STREAMS)
+USRSCTP_SYSCTL_SET_DEF(sctp_cmt_on_off, SCTPCTL_CMT_ON_OFF)
+USRSCTP_SYSCTL_SET_DEF(sctp_cmt_use_dac, SCTPCTL_CMT_USE_DAC)
+USRSCTP_SYSCTL_SET_DEF(sctp_use_cwnd_based_maxburst, SCTPCTL_CWND_MAXBURST)
+USRSCTP_SYSCTL_SET_DEF(sctp_nat_friendly, SCTPCTL_NAT_FRIENDLY)
+USRSCTP_SYSCTL_SET_DEF(sctp_L2_abc_variable, SCTPCTL_ABC_L_VAR)
+USRSCTP_SYSCTL_SET_DEF(sctp_mbuf_threshold_count, SCTPCTL_MAX_CHAINED_MBUFS)
+USRSCTP_SYSCTL_SET_DEF(sctp_do_drain, SCTPCTL_DO_SCTP_DRAIN)
+USRSCTP_SYSCTL_SET_DEF(sctp_hb_maxburst, SCTPCTL_HB_MAX_BURST)
+USRSCTP_SYSCTL_SET_DEF(sctp_abort_if_one_2_one_hits_limit, SCTPCTL_ABORT_AT_LIMIT)
+USRSCTP_SYSCTL_SET_DEF(sctp_min_residual, SCTPCTL_MIN_RESIDUAL)
+USRSCTP_SYSCTL_SET_DEF(sctp_max_retran_chunk, SCTPCTL_MAX_RETRAN_CHUNK)
+USRSCTP_SYSCTL_SET_DEF(sctp_logging_level, SCTPCTL_LOGGING_LEVEL)
+USRSCTP_SYSCTL_SET_DEF(sctp_default_cc_module, SCTPCTL_DEFAULT_CC_MODULE)
+USRSCTP_SYSCTL_SET_DEF(sctp_default_frag_interleave, SCTPCTL_DEFAULT_FRAG_INTERLEAVE)
+USRSCTP_SYSCTL_SET_DEF(sctp_mobility_base, SCTPCTL_MOBILITY_BASE)
+USRSCTP_SYSCTL_SET_DEF(sctp_mobility_fasthandoff, SCTPCTL_MOBILITY_FASTHANDOFF)
+USRSCTP_SYSCTL_SET_DEF(sctp_inits_include_nat_friendly, SCTPCTL_NAT_FRIENDLY_INITS)
+USRSCTP_SYSCTL_SET_DEF(sctp_udp_tunneling_port, SCTPCTL_UDP_TUNNELING_PORT)
+USRSCTP_SYSCTL_SET_DEF(sctp_enable_sack_immediately, SCTPCTL_SACK_IMMEDIATELY_ENABLE)
+USRSCTP_SYSCTL_SET_DEF(sctp_vtag_time_wait, SCTPCTL_TIME_WAIT)
+USRSCTP_SYSCTL_SET_DEF(sctp_blackhole, SCTPCTL_BLACKHOLE)
+USRSCTP_SYSCTL_SET_DEF(sctp_diag_info_code, SCTPCTL_DIAG_INFO_CODE)
+USRSCTP_SYSCTL_SET_DEF(sctp_fr_max_burst_default, SCTPCTL_FRMAXBURST)
+USRSCTP_SYSCTL_SET_DEF(sctp_path_pf_threshold, SCTPCTL_PATH_PF_THRESHOLD)
+USRSCTP_SYSCTL_SET_DEF(sctp_default_ss_module, SCTPCTL_DEFAULT_SS_MODULE)
+USRSCTP_SYSCTL_SET_DEF(sctp_rttvar_bw, SCTPCTL_RTTVAR_BW)
+USRSCTP_SYSCTL_SET_DEF(sctp_rttvar_rtt, SCTPCTL_RTTVAR_RTT)
+USRSCTP_SYSCTL_SET_DEF(sctp_rttvar_eqret, SCTPCTL_RTTVAR_EQRET)
+USRSCTP_SYSCTL_SET_DEF(sctp_steady_step, SCTPCTL_RTTVAR_STEADYS)
+USRSCTP_SYSCTL_SET_DEF(sctp_use_dccc_ecn, SCTPCTL_RTTVAR_DCCCECN)
+USRSCTP_SYSCTL_SET_DEF(sctp_buffer_splitting, SCTPCTL_BUFFER_SPLITTING)
+USRSCTP_SYSCTL_SET_DEF(sctp_initial_cwnd, SCTPCTL_INITIAL_CWND)
 #ifdef SCTP_DEBUG
-USRSCTP_SYSCTL_SET_DEF(sctp_debug_on)
+USRSCTP_SYSCTL_SET_DEF(sctp_debug_on, SCTPCTL_DEBUG)
+#endif
+#if __GNUC__ >= 5 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6) || defined(__clang__)
+#pragma GCC diagnostic pop
 #endif
 
 #define USRSCTP_SYSCTL_GET_DEF(__field) \
@@ -3491,10 +3729,7 @@ USRSCTP_SYSCTL_GET_DEF(sctp_asconf_enable)
 USRSCTP_SYSCTL_GET_DEF(sctp_reconfig_enable)
 USRSCTP_SYSCTL_GET_DEF(sctp_nrsack_enable)
 USRSCTP_SYSCTL_GET_DEF(sctp_pktdrop_enable)
-USRSCTP_SYSCTL_GET_DEF(sctp_strict_sacks)
-#if !defined(SCTP_WITH_NO_CSUM)
 USRSCTP_SYSCTL_GET_DEF(sctp_no_csum_on_loopback)
-#endif
 USRSCTP_SYSCTL_GET_DEF(sctp_peer_chunk_oh)
 USRSCTP_SYSCTL_GET_DEF(sctp_max_burst_default)
 USRSCTP_SYSCTL_GET_DEF(sctp_max_chunks_on_queue)
@@ -3519,6 +3754,7 @@ USRSCTP_SYSCTL_GET_DEF(sctp_init_rtx_max_default)
 USRSCTP_SYSCTL_GET_DEF(sctp_assoc_rtx_max_default)
 USRSCTP_SYSCTL_GET_DEF(sctp_path_rtx_max_default)
 USRSCTP_SYSCTL_GET_DEF(sctp_add_more_threshold)
+USRSCTP_SYSCTL_GET_DEF(sctp_nr_incoming_streams_default)
 USRSCTP_SYSCTL_GET_DEF(sctp_nr_outgoing_streams_default)
 USRSCTP_SYSCTL_GET_DEF(sctp_cmt_on_off)
 USRSCTP_SYSCTL_GET_DEF(sctp_cmt_use_dac)
@@ -3529,7 +3765,6 @@ USRSCTP_SYSCTL_GET_DEF(sctp_mbuf_threshold_count)
 USRSCTP_SYSCTL_GET_DEF(sctp_do_drain)
 USRSCTP_SYSCTL_GET_DEF(sctp_hb_maxburst)
 USRSCTP_SYSCTL_GET_DEF(sctp_abort_if_one_2_one_hits_limit)
-USRSCTP_SYSCTL_GET_DEF(sctp_strict_data_order)
 USRSCTP_SYSCTL_GET_DEF(sctp_min_residual)
 USRSCTP_SYSCTL_GET_DEF(sctp_max_retran_chunk)
 USRSCTP_SYSCTL_GET_DEF(sctp_logging_level)
