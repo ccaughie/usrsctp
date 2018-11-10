@@ -1038,6 +1038,9 @@ usrsctp_set_non_blocking(struct socket *, int);
 int
 usrsctp_get_non_blocking(struct socket *);
 
+int
+usrsctp_is_connected(struct socket *so);
+
 void
 usrsctp_register_address(void *);
 
@@ -1156,6 +1159,7 @@ USRSCTP_SYSCTL_DECL(sctp_steady_step)
 USRSCTP_SYSCTL_DECL(sctp_use_dccc_ecn)
 USRSCTP_SYSCTL_DECL(sctp_buffer_splitting)
 USRSCTP_SYSCTL_DECL(sctp_initial_cwnd)
+USRSCTP_SYSCTL_DECL(sctp_af_conn_mtu)
 #ifdef SCTP_DEBUG
 USRSCTP_SYSCTL_DECL(sctp_debug_on)
 /* More specific values can be found in sctp_constants, but

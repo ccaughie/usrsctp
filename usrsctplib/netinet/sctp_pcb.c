@@ -4736,7 +4736,10 @@ sctp_add_remote_addr(struct sctp_tcb *stcb, struct sockaddr *newaddr,
 #endif
 #if defined(__Userspace__)
 			case AF_CONN:
-				net->mtu = 1280;
+				net->mtu = SCTP_BASE_SYSCTL(sctp_af_conn_mtu);
+				if (!net->mtu) {
+					net->mtu = 1280;
+				}
 				break;
 #endif
 			default:

@@ -124,6 +124,7 @@ struct sctp_sysctl {
 	uint32_t sctp_vtag_time_wait;
 	uint32_t sctp_buffer_splitting;
 	uint32_t sctp_initial_cwnd;
+	uint32_t sctp_af_conn_mtu;
 	uint32_t sctp_blackhole;
 #if defined(SCTP_DEBUG)
 	uint32_t sctp_debug_on;
@@ -532,6 +533,12 @@ struct sctp_sysctl {
 #define SCTPCTL_INITIAL_CWND_MIN	0
 #define SCTPCTL_INITIAL_CWND_MAX	0xffffffff
 #define SCTPCTL_INITIAL_CWND_DEFAULT	3
+
+/* MTU for AF_CONN links */
+#define SCTPCTL_AF_CONN_MTU_DESC	"MTU for AF_CONN links"
+#define SCTPCTL_AF_CONN_MTU_MIN		0
+#define SCTPCTL_AF_CONN_MTU_MAX		1500
+#define SCTPCTL_AF_CONN_MTU_DEFAULT	0
 
 /* rttvar smooth avg for bw calc  */
 #define SCTPCTL_RTTVAR_BW_DESC	"Shift amount DCCC uses for bw smoothing on rtt calc"

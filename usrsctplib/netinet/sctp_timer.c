@@ -1470,9 +1470,10 @@ sctp_pathmtu_timer(struct sctp_inpcb *inp,
     struct sctp_tcb *stcb,
     struct sctp_nets *net)
 {
-	uint32_t next_mtu, mtu;
+	uint32_t next_mtu, mtu, afconn_mtu;
 
 	next_mtu = sctp_get_next_mtu(net->mtu);
+	afconn_mtu = SCTP_BASE_SYSCTL(sctp_af_conn_mtu);
 
 	if ((next_mtu > net->mtu) && (net->port == 0)) {
 		if ((net->src_addr_selected == 0) ||
@@ -1521,6 +1522,11 @@ sctp_pathmtu_timer(struct sctp_inpcb *inp,
 		}
 		if (net->ro._s_addr) {
 			mtu = SCTP_GATHER_MTU_FROM_ROUTE(net->ro._s_addr, &net->ro._s_addr.sa, net->ro.ro_rt);
+
+			if (afconn_mtu && mtu > afconn_mtu) {
+				mtu = afconn_mtu;
+			}
+
 #if defined(INET) || defined(INET6)
 			if (net->port) {
 				mtu -= sizeof(struct udphdr);

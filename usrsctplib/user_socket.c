@@ -2080,6 +2080,17 @@ usrsctp_get_non_blocking(struct socket *so)
 	return (result);
 }
 
+int usrsctp_is_connected(struct socket *so)
+{
+    if (so == NULL)
+    {
+        errno = EBADF;
+        return -1;
+    }
+
+    return (so->so_state & SS_ISCONNECTED) != 0;
+}
+
 int
 soconnect(struct socket *so, struct sockaddr *nam)
 {
@@ -3706,6 +3717,7 @@ USRSCTP_SYSCTL_SET_DEF(sctp_steady_step, SCTPCTL_RTTVAR_STEADYS)
 USRSCTP_SYSCTL_SET_DEF(sctp_use_dccc_ecn, SCTPCTL_RTTVAR_DCCCECN)
 USRSCTP_SYSCTL_SET_DEF(sctp_buffer_splitting, SCTPCTL_BUFFER_SPLITTING)
 USRSCTP_SYSCTL_SET_DEF(sctp_initial_cwnd, SCTPCTL_INITIAL_CWND)
+USRSCTP_SYSCTL_SET_DEF(sctp_af_conn_mtu, SCTPCTL_AF_CONN_MTU)
 #ifdef SCTP_DEBUG
 USRSCTP_SYSCTL_SET_DEF(sctp_debug_on, SCTPCTL_DEBUG)
 #endif
@@ -3788,6 +3800,7 @@ USRSCTP_SYSCTL_GET_DEF(sctp_steady_step)
 USRSCTP_SYSCTL_GET_DEF(sctp_use_dccc_ecn)
 USRSCTP_SYSCTL_GET_DEF(sctp_buffer_splitting)
 USRSCTP_SYSCTL_GET_DEF(sctp_initial_cwnd)
+USRSCTP_SYSCTL_GET_DEF(sctp_af_conn_mtu)
 #ifdef SCTP_DEBUG
 USRSCTP_SYSCTL_GET_DEF(sctp_debug_on)
 #endif

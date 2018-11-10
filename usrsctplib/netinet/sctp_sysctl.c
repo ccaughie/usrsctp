@@ -143,6 +143,7 @@ sctp_init_sysctls()
 	SCTP_BASE_SYSCTL(sctp_vtag_time_wait) = SCTPCTL_TIME_WAIT_DEFAULT;
 	SCTP_BASE_SYSCTL(sctp_buffer_splitting) = SCTPCTL_BUFFER_SPLITTING_DEFAULT;
 	SCTP_BASE_SYSCTL(sctp_initial_cwnd) = SCTPCTL_INITIAL_CWND_DEFAULT;
+	SCTP_BASE_SYSCTL(sctp_af_conn_mtu) = SCTPCTL_AF_CONN_MTU_DEFAULT;
 	SCTP_BASE_SYSCTL(sctp_rttvar_bw) = SCTPCTL_RTTVAR_BW_DEFAULT;
 	SCTP_BASE_SYSCTL(sctp_rttvar_rtt) = SCTPCTL_RTTVAR_RTT_DEFAULT;
 	SCTP_BASE_SYSCTL(sctp_rttvar_eqret) = SCTPCTL_RTTVAR_EQRET_DEFAULT;
@@ -1315,6 +1316,7 @@ SCTP_UINT_SYSCTL(nat_friendly_init, sctp_inits_include_nat_friendly, SCTPCTL_NAT
 SCTP_UINT_SYSCTL(vtag_time_wait, sctp_vtag_time_wait, SCTPCTL_TIME_WAIT)
 SCTP_UINT_SYSCTL(buffer_splitting, sctp_buffer_splitting, SCTPCTL_BUFFER_SPLITTING)
 SCTP_UINT_SYSCTL(initial_cwnd, sctp_initial_cwnd, SCTPCTL_INITIAL_CWND)
+SCTP_UINT_SYSCTL(initial_cwnd, sctp_af_conn_mtu, SCTPCTL_AF_CONN_MTU)
 SCTP_UINT_SYSCTL(rttvar_bw, sctp_rttvar_bw, SCTPCTL_RTTVAR_BW)
 SCTP_UINT_SYSCTL(rttvar_rtt, sctp_rttvar_rtt, SCTPCTL_RTTVAR_RTT)
 SCTP_UINT_SYSCTL(rttvar_eqret, sctp_rttvar_eqret, SCTPCTL_RTTVAR_EQRET)
@@ -1409,6 +1411,7 @@ sctp_sysctl_handle_int(SYSCTL_HANDLER_ARGS)
 		RANGECHK(SCTP_BASE_SYSCTL(sctp_vtag_time_wait), SCTPCTL_TIME_WAIT_MIN, SCTPCTL_TIME_WAIT_MAX);
 		RANGECHK(SCTP_BASE_SYSCTL(sctp_buffer_splitting), SCTPCTL_BUFFER_SPLITTING_MIN, SCTPCTL_BUFFER_SPLITTING_MAX);
 		RANGECHK(SCTP_BASE_SYSCTL(sctp_initial_cwnd), SCTPCTL_INITIAL_CWND_MIN, SCTPCTL_INITIAL_CWND_MAX);
+		RANGECHK(SCTP_BASE_SYSCTL(sctp_af_conn_mtu), SCTPCTL_AF_CONN_MTU_MIN, SCTPCTL_AF_CONN_MTU_MAX);
 		RANGECHK(SCTP_BASE_SYSCTL(sctp_rttvar_bw), SCTPCTL_RTTVAR_BW_MIN, SCTPCTL_RTTVAR_BW_MAX);
 		RANGECHK(SCTP_BASE_SYSCTL(sctp_rttvar_rtt), SCTPCTL_RTTVAR_RTT_MIN, SCTPCTL_RTTVAR_RTT_MAX);
 		RANGECHK(SCTP_BASE_SYSCTL(sctp_rttvar_eqret), SCTPCTL_RTTVAR_EQRET_MIN, SCTPCTL_RTTVAR_EQRET_MAX);
@@ -1687,6 +1690,10 @@ sysctl_setup_sctp(void)
 	sysctl_add_oid(&sysctl_oid_top, "initial_cwnd", CTLTYPE_INT|CTLFLAG_RW,
             &SCTP_BASE_SYSCTL(sctp_initial_cwnd), 0, sctp_sysctl_handle_int,
 	    SCTPCTL_INITIAL_CWND_DESC);
+
+	sysctl_add_oid(&sysctl_oid_top, "af_conn_mtu", CTLTYPE_INT|CTLFLAG_RW,
+            &SCTP_BASE_SYSCTL(sctp_af_conn_mtu), 0, sctp_sysctl_handle_int,
+	    SCTPCTL_AF_CONN_MTU_DESC);
 
 	sysctl_add_oid(&sysctl_oid_top, "rttvar_bw", CTLTYPE_INT|CTLFLAG_RW,
             &SCTP_BASE_SYSCTL(sctp_rttvar_bw), 0, sctp_sysctl_handle_int,
