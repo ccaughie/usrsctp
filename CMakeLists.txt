@@ -67,6 +67,11 @@ if (sctp_inet6)
 	add_definitions(-DINET6)
 endif ()
 
+option(sctp_use_winsock_codes "Use Winsock error codes" 0)
+if (sctp_use_winsock_codes)
+	add_definitions(-DSCTP_USE_WINSOCK_CODES)
+endif ()
+
 option(sctp_werror "Treat warning as error" 1)
 
 option(sctp_link_programs_static "Link example programs static" 0)
