@@ -75,3 +75,6 @@ callgrind.out*
 
 # cmake build
 /build
+
+# Visual Studio Code
+/.vscode
