@@ -72,6 +72,11 @@ if (sctp_use_winsock_codes)
 	add_definitions(-DSCTP_USE_WINSOCK_CODES)
 endif ()
 
+option(sctp_no_file_in_diag "Don't use __FILE__ in diagnostic strings" 0)
+if (sctp_no_file_in_diag)
+	add_definitions(-DSCTP_NO_FILE_IN_DIAG)
+endif ()
+
 option(sctp_werror "Treat warning as error" 1)
 
 option(sctp_link_programs_static "Link example programs static" 0)

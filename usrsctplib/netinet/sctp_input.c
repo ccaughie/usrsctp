@@ -4858,7 +4858,7 @@ sctp_process_control(struct mbuf *m, int iphlen, int *offset, int length,
 			}
 		}
 		if (stcb == NULL) {
-			snprintf(msg, sizeof(msg), "OOTB, %s:%d at %s", __FILE__, __LINE__, __func__);
+			snprintf(msg, sizeof(msg), "OOTB, %s:%d at %s", SCTP_DIAG_FILENAME, __LINE__, __func__);
 			op_err = sctp_generate_cause(SCTP_BASE_SYSCTL(sctp_diag_info_code),
 			                             msg);
 			/* no association, so it's out of the blue... */
@@ -4902,7 +4902,7 @@ sctp_process_control(struct mbuf *m, int iphlen, int *offset, int length,
 				if (stcb != NULL) {
 					SCTP_TCB_UNLOCK(stcb);
 				}
-				snprintf(msg, sizeof(msg), "OOTB, %s:%d at %s", __FILE__, __LINE__, __func__);
+				snprintf(msg, sizeof(msg), "OOTB, %s:%d at %s", SCTP_DIAG_FILENAME, __LINE__, __func__);
 				op_err = sctp_generate_cause(SCTP_BASE_SYSCTL(sctp_diag_info_code),
 				                             msg);
 				sctp_handle_ootb(m, iphlen, *offset, src, dst,
@@ -5873,7 +5873,7 @@ sctp_common_input_processing(struct mbuf **mm, int iphlen, int offset, int lengt
 #if defined(__FreeBSD__)
 			SCTP_PROBE5(receive, NULL, stcb, m, stcb, sh);
 #endif
-			snprintf(msg, sizeof(msg), "OOTB, %s:%d at %s", __FILE__, __LINE__, __func__);
+			snprintf(msg, sizeof(msg), "OOTB, %s:%d at %s", SCTP_DIAG_FILENAME, __LINE__, __func__);
 			op_err = sctp_generate_cause(SCTP_BASE_SYSCTL(sctp_diag_info_code),
 			                             msg);
 			sctp_handle_ootb(m, iphlen, offset, src, dst, sh, inp, op_err,
@@ -5956,7 +5956,7 @@ sctp_common_input_processing(struct mbuf **mm, int iphlen, int offset, int lengt
 #if defined(__FreeBSD__)
 			SCTP_PROBE5(receive, NULL, NULL, m, NULL, sh);
 #endif
-			snprintf(msg, sizeof(msg), "OOTB, %s:%d at %s", __FILE__, __LINE__, __func__);
+			snprintf(msg, sizeof(msg), "OOTB, %s:%d at %s", SCTP_DIAG_FILENAME, __LINE__, __func__);
 			op_err = sctp_generate_cause(SCTP_BASE_SYSCTL(sctp_diag_info_code),
 			                             msg);
 			sctp_handle_ootb(m, iphlen, offset, src, dst, sh, inp, op_err,
@@ -6042,7 +6042,7 @@ sctp_common_input_processing(struct mbuf **mm, int iphlen, int offset, int lengt
 			/*
 			 * We consider OOTB any data sent during asoc setup.
 			 */
-			snprintf(msg, sizeof(msg), "OOTB, %s:%d at %s", __FILE__, __LINE__, __func__);
+			snprintf(msg, sizeof(msg), "OOTB, %s:%d at %s", SCTP_DIAG_FILENAME, __LINE__, __func__);
 			op_err = sctp_generate_cause(SCTP_BASE_SYSCTL(sctp_diag_info_code),
 			                             msg);
 			sctp_handle_ootb(m, iphlen, offset, src, dst, sh, inp, op_err,

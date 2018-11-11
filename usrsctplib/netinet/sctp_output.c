@@ -5992,7 +5992,7 @@ sctp_send_initiate_ack(struct sctp_inpcb *inp, struct sctp_tcb *stcb,
 		if (op_err == NULL) {
 			char msg[SCTP_DIAG_INFO_LEN];
 
-			snprintf(msg, sizeof(msg), "%s:%d at %s", __FILE__, __LINE__, __func__);
+			snprintf(msg, sizeof(msg), "%s:%d at %s", SCTP_DIAG_FILENAME, __LINE__, __func__);
 			op_err = sctp_generate_cause(SCTP_BASE_SYSCTL(sctp_diag_info_code),
 			                             msg);
 		}
@@ -7226,7 +7226,7 @@ sctp_sendall_iterator(struct sctp_inpcb *inp, struct sctp_tcb *stcb, void *ptr,
 
 					abort_anyway:
 						snprintf(msg, sizeof(msg),
-						         "%s:%d at %s", __FILE__, __LINE__, __func__);
+						         "%s:%d at %s", SCTP_DIAG_FILENAME, __LINE__, __func__);
 						op_err = sctp_generate_cause(SCTP_BASE_SYSCTL(sctp_diag_info_code),
 						                             msg);
 						atomic_add_int(&stcb->asoc.refcnt, 1);
@@ -14666,7 +14666,7 @@ dataless_eof:
 						free_cnt_applied = 0;
 					}
 					snprintf(msg, sizeof(msg),
-					         "%s:%d at %s", __FILE__, __LINE__, __func__);
+					         "%s:%d at %s", SCTP_DIAG_FILENAME, __LINE__, __func__);
 					op_err = sctp_generate_cause(SCTP_BASE_SYSCTL(sctp_diag_info_code),
 					                             msg);
 					sctp_abort_an_association(stcb->sctp_ep, stcb,
