@@ -1163,7 +1163,7 @@ union sctp_sockstore {
 #ifndef __APPLE__
 #ifndef __Userspace__
 #ifndef ntohll
-#if defined(__Userspace_os_Linux)
+#if defined(__Userspace_os_Linux) || defined(__Userspace_os_Android)
 #ifndef _BSD_SOURCE
 #define _BSD_SOURCE
 #endif
@@ -1175,7 +1175,7 @@ union sctp_sockstore {
 #endif
 
 #ifndef htonll
-#if defined(__Userspace_os_Linux)
+#if defined(__Userspace_os_Linux) || defined(__Userspace_os_Android)
 #ifndef _BSD_SOURCE
 #define _BSD_SOURCE
 #endif

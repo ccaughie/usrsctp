@@ -40,7 +40,7 @@
 #include <pthread_np.h>
 #endif
 
-#if defined(__Userspace_os_Linux)
+#if defined(__Userspace_os_Linux) || defined(__Userspace_os_Android)
 #include <sys/prctl.h>
 #endif
 
@@ -77,7 +77,7 @@ sctp_userspace_set_threadname(const char *name)
 #if defined(__Userspace_os_Darwin)
 	pthread_setname_np(name);
 #endif
-#if defined(__Userspace_os_Linux)
+#if defined(__Userspace_os_Linux) || defined(__Userspace_os_Android)
 	prctl(PR_SET_NAME, name);
 #endif
 #if defined(__Userspace_os_FreeBSD)
@@ -117,7 +117,7 @@ sctp_userspace_get_mtu_from_ifn(uint32_t if_index, int af)
 }
 #endif
 
-#if defined(__Userspace_os_DragonFly) || defined(__Userspace_os_Linux) || defined(__Userspace_os_NaCl) || defined(__Userspace_os_NetBSD) || defined(__Userspace_os_Windows)
+#if defined(__Userspace_os_DragonFly) || defined(__Userspace_os_Linux) || defined(__Userspace_os_Android) || defined(__Userspace_os_NaCl) || defined(__Userspace_os_NetBSD) || defined(__Userspace_os_Windows)
 int
 timingsafe_bcmp(const void *b1, const void *b2, size_t n)
 {

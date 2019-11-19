@@ -82,7 +82,7 @@ extern int read_random(void *buf, int count);
 /* Source ip_output.c. extern'd in ip_var.h */
 extern u_short ip_id;
 
-#if defined(__Userspace_os_Linux)
+#if defined(__Userspace_os_Linux) || defined(__Userspace_os_Android)
 #define IPV6_VERSION            0x60
 #endif
 

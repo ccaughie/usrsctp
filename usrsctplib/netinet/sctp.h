@@ -40,7 +40,7 @@ __FBSDID("$FreeBSD: head/sys/netinet/sctp.h 323657 2017-09-16 21:26:06Z tuexen $
 #ifndef _NETINET_SCTP_H_
 #define _NETINET_SCTP_H_
 
-#if (defined(__APPLE__) || defined(__Userspace_os_Linux) || defined(__Userspace_os_Darwin))
+#if (defined(__APPLE__) || defined(__Userspace_os_Linux) || defined(__Userspace_os_Android) || defined(__Userspace_os_Darwin))
 #include <stdint.h>
 #endif
 

@@ -78,3 +78,6 @@ callgrind.out*
 
 # Visual Studio Code
 /.vscode
+
+# macOS
+.DS_Store

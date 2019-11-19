@@ -227,6 +227,12 @@ if (CMAKE_C_COMPILER_ID MATCHES "Clang" OR CMAKE_C_COMPILER_ID MATCHES "AppleCla
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wstrict-prototypes")
 	endif ()
 
+	check_c_compiler_flag(-Wno-sign-compare has_wno_sign_compare)
+	if (has_wno_sign_compare)
+		set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   -Wno-sign-compare")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
+	endif()
+
 	if (sctp_werror)
 		set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   -Werror")
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")

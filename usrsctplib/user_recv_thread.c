@@ -46,7 +46,7 @@
 #include <netinet/sctp_pcb.h>
 #include <netinet/sctp_input.h>
 #if 0
-#if defined(__Userspace_os_Linux)
+#if defined(__Userspace_os_Linux) || defined(__Userspace_os_Android)
 #include <linux/netlink.h>
 #ifdef HAVE_LINUX_IF_ADDR_H
 #include <linux/if_addr.h>
