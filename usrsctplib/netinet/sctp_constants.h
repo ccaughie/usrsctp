@@ -34,7 +34,7 @@
 
 #ifdef __FreeBSD__
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/sys/netinet/sctp_constants.h 338134 2018-08-21 13:25:32Z tuexen $");
+__FBSDID("$FreeBSD: head/sys/netinet/sctp_constants.h 359405 2020-03-28 20:25:45Z tuexen $");
 #endif
 
 #ifndef _NETINET_SCTP_CONSTANTS_H_
@@ -551,14 +551,13 @@ extern void getwintimeofday(struct timeval *tv);
 #define SCTP_TIMER_TYPE_ASCONF		10
 #define SCTP_TIMER_TYPE_SHUTDOWNGUARD	11
 #define SCTP_TIMER_TYPE_AUTOCLOSE	12
-#define SCTP_TIMER_TYPE_EVENTWAKE	13
-#define SCTP_TIMER_TYPE_STRRESET        14
-#define SCTP_TIMER_TYPE_INPKILL         15
-#define SCTP_TIMER_TYPE_ASOCKILL        16
-#define SCTP_TIMER_TYPE_ADDR_WQ         17
-#define SCTP_TIMER_TYPE_PRIM_DELETED    18
+#define SCTP_TIMER_TYPE_STRRESET	13
+#define SCTP_TIMER_TYPE_INPKILL		14
+#define SCTP_TIMER_TYPE_ASOCKILL	15
+#define SCTP_TIMER_TYPE_ADDR_WQ		16
+#define SCTP_TIMER_TYPE_PRIM_DELETED	17
 /* add new timers here - and increment LAST */
-#define SCTP_TIMER_TYPE_LAST            19
+#define SCTP_TIMER_TYPE_LAST		18
 
 #define SCTP_IS_TIMER_TYPE_VALID(t)	(((t) > SCTP_TIMER_TYPE_NONE) && \
 					 ((t) < SCTP_TIMER_TYPE_LAST))
@@ -593,16 +592,6 @@ extern void getwintimeofday(struct timeval *tv);
 #define SCTP_ASOC_MAX_CHUNKS_ON_QUEUE 512
 #endif
 
-
-/* The conversion from time to ticks and vice versa is done by rounding
- * upwards. This way we can test in the code the time to be positive and
- * know that this corresponds to a positive number of ticks.
- */
-#define MSEC_TO_TICKS(x) ((hz == 1000) ? x : ((((x) * hz) + 999) / 1000))
-#define TICKS_TO_MSEC(x) ((hz == 1000) ? x : ((((x) * 1000) + (hz - 1)) / hz))
-
-#define SEC_TO_TICKS(x) ((x) * hz)
-#define TICKS_TO_SEC(x) (((x) + (hz - 1)) / hz)
 
 /*
  * Basically the minimum amount of time before I do a early FR. Making this
@@ -836,7 +825,7 @@ extern void getwintimeofday(struct timeval *tv);
 #define SCTP_LOC_33 0x00000021
 #define SCTP_LOC_34 0x00000022
 #define SCTP_LOC_35 0x00000023
-
+#define SCTP_LOC_36 0x00000024
 
 /* Free assoc codes */
 #define SCTP_NORMAL_PROC      0
@@ -1016,6 +1005,9 @@ extern void getwintimeofday(struct timeval *tv);
 #define IN4_ISLINKLOCAL_ADDRESS(a) \
     ((((uint8_t *)&(a)->s_addr)[0] == 169) && \
      (((uint8_t *)&(a)->s_addr)[1] == 254))
+
+/* Maximum size of optval for IPPROTO_SCTP level socket options. */
+#define SCTP_SOCKET_OPTION_LIMIT (64 * 1024)
 
 #if defined(__Userspace__)
 #if defined(__Userspace_os_Windows)

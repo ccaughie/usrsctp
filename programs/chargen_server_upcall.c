@@ -49,6 +49,7 @@
 #include <arpa/inet.h>
 #endif
 #include <usrsctp.h>
+#include "programs_helper.h"
 
 #define BUFFERSIZE 10240
 #define PORT 19
@@ -67,14 +68,14 @@ initBuffer(void) {
 
 unsigned int signCounter = 0;
 static void
-handle_upcall(struct socket *sock, void *data, int flgs);
+handle_upcall(struct socket *upcall_socket, void *upcall_data, int upcall_flags);
 
 static void
-handle_accept(struct socket *sock, void *data, int flags)
+handle_accept(struct socket *upcall_socket, void *upcall_data, int upcall_flags)
 {
 	struct socket *conn_sock;
 
-	if (((conn_sock = usrsctp_accept(sock, NULL, NULL)) == NULL)
+	if (((conn_sock = usrsctp_accept(upcall_socket, NULL, NULL)) == NULL)
 	    && (errno != EINPROGRESS)) {
 		perror("usrsctp_accept");
 		return;
@@ -85,9 +86,9 @@ handle_accept(struct socket *sock, void *data, int flags)
 }
 
 static void
-handle_upcall(struct socket *sock, void *data, int flgs)
+handle_upcall(struct socket *upcall_socket, void *upcall_data, int upcall_flags)
 {
-	int events = usrsctp_get_events(sock);
+	int events = usrsctp_get_events(upcall_socket);
 
 	if (events & SCTP_EVENT_READ && !send_done) {
 		char *buf;
@@ -95,31 +96,31 @@ handle_upcall(struct socket *sock, void *data, int flgs)
 		ssize_t n;
 		struct sockaddr_storage addr;
 		buf = malloc(BUFFERSIZE);
-		int flags = 0;
+		int recv_flags = 0;
 		socklen_t len = (socklen_t)sizeof(struct sockaddr_storage);
 		unsigned int infotype = 0;
 		socklen_t infolen = sizeof(struct sctp_recvv_rn);
 		memset(&rn, 0, sizeof(struct sctp_recvv_rn));
 
-		n = usrsctp_recvv(sock, buf, BUFFERSIZE, (struct sockaddr *) &addr, &len, (void *)&rn,
-				 &infolen, &infotype, &flags);
+		n = usrsctp_recvv(upcall_socket, buf, BUFFERSIZE, (struct sockaddr *) &addr, &len, (void *)&rn,
+				 &infolen, &infotype, &recv_flags);
 		if (n < 0) {
 			perror("usrsctp_recvv");
 			done = 1;
-			usrsctp_close(sock);
-			printf("client socket %p closed\n", (void *)sock);
-			sock = NULL;
+			usrsctp_close(upcall_socket);
+			printf("client socket %p closed\n", (void *)upcall_socket);
+			upcall_socket = NULL;
 			return;
 		}
 		if (n == 0) {
 			done = 1;
-			usrsctp_close(sock);
-			printf("client socket %p closed\n", (void *)sock);
-			sock = NULL;
+			usrsctp_close(upcall_socket);
+			printf("client socket %p closed\n", (void *)upcall_socket);
+			upcall_socket = NULL;
 			return;
 		}
 		if (n > 0) {
-			if (flags & MSG_NOTIFICATION) {
+			if (recv_flags & MSG_NOTIFICATION) {
 				printf("Notification of length %d received.\n", (int)n);
 			} else {
 				printf("data of size %d received\n", (int)n);
@@ -135,27 +136,17 @@ handle_upcall(struct socket *sock, void *data, int flgs)
 		snd_info.snd_ppid = 0;
 		snd_info.snd_context = 0;
 		snd_info.snd_assoc_id = 0;
-		if (usrsctp_sendv(sock, buffer, strlen(buffer), NULL, 0, &snd_info, (socklen_t)sizeof(struct sctp_sndinfo), SCTP_SENDV_SNDINFO, 0) < 0) {
-			if (errno != EAGAIN) {
+		if (usrsctp_sendv(upcall_socket, buffer, strlen(buffer), NULL, 0, &snd_info, (socklen_t)sizeof(struct sctp_sndinfo), SCTP_SENDV_SNDINFO, 0) < 0) {
+			if (errno != EAGAIN && errno != EWOULDBLOCK) {
 				send_done = 1;
-				usrsctp_close(sock);
-				printf("client socket %p closed\n", (void *)sock);
+				usrsctp_close(upcall_socket);
+				printf("client socket %p closed\n", (void *)upcall_socket);
 				return;
 			}
 		}
 	}
 
 	return;
-}
-
-void
-debug_printf(const char *format, ...)
-{
-	va_list ap;
-
-	va_start(ap, format);
-	vprintf(format, ap);
-	va_end(ap);
 }
 
 int
@@ -168,14 +159,15 @@ main(int argc, char *argv[])
 	const int on = 1;
 
 	if (argc > 1) {
-		usrsctp_init(atoi(argv[1]), NULL, debug_printf);
+		usrsctp_init(atoi(argv[1]), NULL, debug_printf_stack);
 	} else {
-		usrsctp_init(9899, NULL, debug_printf);
+		usrsctp_init(9899, NULL, debug_printf_stack);
 	}
 #ifdef SCTP_DEBUG
 	usrsctp_sysctl_set_sctp_debug_on(SCTP_DEBUG_NONE);
 #endif
 	usrsctp_sysctl_set_sctp_blackhole(2);
+	usrsctp_sysctl_set_sctp_no_csum_on_loopback(0);
 
 	if ((listening_socket = usrsctp_socket(AF_INET6, SOCK_STREAM, IPPROTO_SCTP, NULL, NULL, 0, NULL)) == NULL) {
 		perror("usrsctp_socket");

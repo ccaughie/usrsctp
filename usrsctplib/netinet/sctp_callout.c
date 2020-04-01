@@ -54,18 +54,19 @@
 #include <netinet/sctp_callout.h>
 #include <netinet/sctp_pcb.h>
 #endif
+#include <netinet/sctputil.h>
 
 /*
  * Callout/Timer routines for OS that doesn't have them
  */
 #if defined(__APPLE__) || defined(__Userspace__)
-static int ticks = 0;
+static uint32_t ticks = 0;
 #else
 extern int ticks;
 #endif
 
-int sctp_get_tick_count(void) {
-	int ret;
+uint32_t sctp_get_tick_count(void) {
+	uint32_t ret;
 
 	SCTP_TIMERQ_LOCK();
 	ret = ticks;
@@ -86,17 +87,20 @@ sctp_os_timer_init(sctp_os_timer_t *c)
 	memset(c, 0, sizeof(*c));
 }
 
-void
-sctp_os_timer_start(sctp_os_timer_t *c, int to_ticks, void (*ftn) (void *),
+int
+sctp_os_timer_start(sctp_os_timer_t *c, uint32_t to_ticks, void (*ftn) (void *),
                     void *arg)
 {
+	int ret = 0;
+
 	/* paranoia */
 	if ((c == NULL) || (ftn == NULL))
-	    return;
+		return (ret);
 
 	SCTP_TIMERQ_LOCK();
 	/* check to see if we're rescheduling a timer */
 	if (c->c_flags & SCTP_CALLOUT_PENDING) {
+		ret = 1;
 		if (c == sctp_os_timer_next) {
 			sctp_os_timer_next = TAILQ_NEXT(c, tqe);
 		}
@@ -113,7 +117,7 @@ sctp_os_timer_start(sctp_os_timer_t *c, int to_ticks, void (*ftn) (void *),
 	 * We could unlock/splx here and lock/spl at the TAILQ_INSERT_TAIL,
 	 * but there's no point since doing this setup doesn't take much time.
 	 */
-	if (to_ticks <= 0)
+	if (to_ticks == 0)
 		to_ticks = 1;
 
 	c->c_arg = arg;
@@ -122,6 +126,7 @@ sctp_os_timer_start(sctp_os_timer_t *c, int to_ticks, void (*ftn) (void *),
 	c->c_time = ticks + to_ticks;
 	TAILQ_INSERT_TAIL(&SCTP_BASE_INFO(callqueue), c, tqe);
 	SCTP_TIMERQ_UNLOCK();
+	return (ret);
 }
 
 int
@@ -146,7 +151,7 @@ sctp_os_timer_stop(sctp_os_timer_t *c)
 }
 
 void
-sctp_handle_tick(int delta)
+sctp_handle_tick(uint32_t elapsed_ticks)
 {
 	sctp_os_timer_t *c;
 	void (*c_func)(void *);
@@ -154,10 +159,10 @@ sctp_handle_tick(int delta)
 
 	SCTP_TIMERQ_LOCK();
 	/* update our tick count */
-	ticks += delta;
+	ticks += elapsed_ticks;
 	c = TAILQ_FIRST(&SCTP_BASE_INFO(callqueue));
 	while (c) {
-		if (c->c_time <= ticks) {
+		if (SCTP_UINT32_GE(ticks, c->c_time)) {
 			sctp_os_timer_next = TAILQ_NEXT(c, tqe);
 			TAILQ_REMOVE(&SCTP_BASE_INFO(callqueue), c, tqe);
 			c_func = c->c_func;
@@ -195,16 +200,18 @@ user_sctp_timer_iterate(void *arg)
 #if defined (__Userspace_os_Windows)
 		Sleep(TIMEOUT_INTERVAL);
 #else
-		struct timeval timeout;
+		struct timespec amount, remaining;
 
-		timeout.tv_sec  = 0;
-		timeout.tv_usec = 1000 * TIMEOUT_INTERVAL;
-		select(0, NULL, NULL, NULL, &timeout);
+		remaining.tv_sec = 0;
+		remaining.tv_nsec = TIMEOUT_INTERVAL * 1000 * 1000;
+		do {
+			amount = remaining;
+		} while (nanosleep(&amount, &remaining) == -1);
 #endif
 		if (atomic_cmpset_int(&SCTP_BASE_VAR(timer_thread_should_exit), 1, 1)) {
 			break;
 		}
-		sctp_handle_tick(MSEC_TO_TICKS(TIMEOUT_INTERVAL));
+		sctp_handle_tick(sctp_msecs_to_ticks(TIMEOUT_INTERVAL));
 	}
 	return (NULL);
 }
@@ -221,6 +228,8 @@ sctp_start_timer(void)
 	rc = sctp_userspace_thread_create(&SCTP_BASE_VAR(timer_thread), user_sctp_timer_iterate);
 	if (rc) {
 		SCTP_PRINTF("ERROR; return code from sctp_thread_create() is %d\n", rc);
+	} else {
+		SCTP_BASE_VAR(timer_thread_started) = 1;
 	}
 }
 

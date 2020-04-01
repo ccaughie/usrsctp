@@ -31,7 +31,7 @@
 #include <netinet/sctp_pcb.h>
 #include <sys/timeb.h>
 #include <iphlpapi.h>
-#ifdef _MSC_VER
+#if !defined(__MINGW32__)
 #pragma comment(lib, "IPHLPAPI.lib")
 #endif
 #endif
@@ -48,6 +48,10 @@
 /* Adapter to translate Unix thread start routines to Windows thread start
  * routines.
  */
+#if defined(__MINGW32__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
 static DWORD WINAPI
 sctp_create_thread_adapter(void *arg) {
 	start_routine_t start_routine = (start_routine_t)arg;
@@ -63,6 +67,11 @@ sctp_userspace_thread_create(userland_thread_t *thread, start_routine_t start_ro
 		return GetLastError();
 	return 0;
 }
+
+#if defined(__MINGW32__)
+#pragma GCC diagnostic pop
+#endif
+
 #else
 int
 sctp_userspace_thread_create(userland_thread_t *thread, start_routine_t start_routine)
@@ -117,7 +126,7 @@ sctp_userspace_get_mtu_from_ifn(uint32_t if_index, int af)
 }
 #endif
 
-#if defined(__Userspace_os_DragonFly) || defined(__Userspace_os_Linux) || defined(__Userspace_os_Android) || defined(__Userspace_os_NaCl) || defined(__Userspace_os_NetBSD) || defined(__Userspace_os_Windows)
+#if defined(__Userspace_os_Darwin) || defined(__Userspace_os_DragonFly) || defined(__Userspace_os_Linux) || defined(__Userspace_os_Android) || defined(__Userspace_os_NaCl) || defined(__Userspace_os_NetBSD) || defined(__Userspace_os_Windows) || defined(__Userspace_os_Fuchsia)
 int
 timingsafe_bcmp(const void *b1, const void *b2, size_t n)
 {

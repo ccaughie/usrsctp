@@ -34,7 +34,7 @@
 
 #ifdef __FreeBSD__
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/sys/netinet/sctp_bsd_addr.c 333813 2018-05-18 20:13:34Z mmacy $");
+__FBSDID("$FreeBSD: head/sys/netinet/sctp_bsd_addr.c 358080 2020-02-18 19:41:55Z tuexen $");
 #endif
 
 #include <netinet/sctp_os.h>
@@ -203,6 +203,8 @@ sctp_startup_iterator(void)
 #elif defined(__Userspace__)
 	if (sctp_userspace_thread_create(&sctp_it_ctl.thread_proc, &sctp_iterator_thread)) {
 		SCTP_PRINTF("ERROR: Creating sctp_iterator_thread failed.\n");
+	} else {
+		SCTP_BASE_VAR(iterator_thread_started) = 1;
 	}
 #endif
 }
@@ -569,6 +571,7 @@ sctp_init_ifns_for_vrf(int vrfid)
 	 * any IFA that exists as we float through the
 	 * list of IFA's
 	 */
+	struct epoch_tracker et;
 	struct ifnet *ifn;
 	struct ifaddr *ifa;
 	struct sctp_ifa *sctp_ifa;
@@ -578,12 +581,12 @@ sctp_init_ifns_for_vrf(int vrfid)
 #endif
 
 	IFNET_RLOCK();
+	NET_EPOCH_ENTER(et);
 	CK_STAILQ_FOREACH(ifn, &MODULE_GLOBAL(ifnet), if_link) {
 		if (sctp_is_desired_interface_type(ifn) == 0) {
 			/* non desired type */
 			continue;
 		}
-		IF_ADDR_RLOCK(ifn);
 		CK_STAILQ_FOREACH(ifa, &ifn->if_addrhead, ifa_link) {
 			if (ifa->ifa_addr == NULL) {
 				continue;
@@ -636,8 +639,8 @@ sctp_init_ifns_for_vrf(int vrfid)
 				sctp_ifa->localifa_flags &= ~SCTP_ADDR_DEFER_USE;
 			}
 		}
-		IF_ADDR_RUNLOCK(ifn);
 	}
+	NET_EPOCH_EXIT(et);
 	IFNET_RUNLOCK();
 }
 #endif
@@ -741,21 +744,8 @@ sctp_addr_change(struct ifaddr *ifa, int cmd)
 
 #if defined(__FreeBSD__)
 void
-sctp_add_or_del_interfaces(int (*pred)(struct ifnet *), int add)
-{
-	struct ifnet *ifn;
-	struct ifaddr *ifa;
-
-	IFNET_RLOCK();
-	CK_STAILQ_FOREACH(ifn, &MODULE_GLOBAL(ifnet), if_link) {
-		if (!(*pred)(ifn)) {
-			continue;
-		}
-		CK_STAILQ_FOREACH(ifa, &ifn->if_addrhead, ifa_link) {
-			sctp_addr_change(ifa, add ? RTM_ADD : RTM_DELETE);
-		}
-	}
-	IFNET_RUNLOCK();
+sctp_addr_change_event_handler(void *arg __unused, struct ifaddr *ifa, int cmd) {
+	sctp_addr_change(ifa, cmd);
 }
 #endif
 #if defined(__APPLE__)
