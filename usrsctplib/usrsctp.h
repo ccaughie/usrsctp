@@ -1065,9 +1065,6 @@ usrsctp_deregister_address(void *);
 int
 usrsctp_set_ulpinfo(struct socket *, void *);
 
-void
-usrsctp_fire_timer(int delta);
-
 int
 usrsctp_set_upcall(struct socket *so,
                    void (*upcall)(struct socket *, void *, int),
